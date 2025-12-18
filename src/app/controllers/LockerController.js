@@ -1,0 +1,93 @@
+// server/src/app/controllers/LockerController.js
+import mongoose from "mongoose";
+import Locker from "../models/Locker.js";
+import History from "../models/History.js";
+
+class LockerController {
+  // GET /lockers/status  (01-06)
+  async status(req, res) {
+    try {
+      const all = await Locker.find().lean();
+
+      // init 6 lockers
+      for (let i = 1; i <= 6; i++) {
+        const id = i.toString().padStart(2, "0");
+        const exists = all.find((l) => l.lockerId === id);
+        if (!exists) {
+          await Locker.updateOne(
+            { lockerId: id },
+            { $setOnInsert: { lockerId: id, status: "EMPTY", ownerId: null } },
+            { upsert: true }
+          );
+        }
+      }
+
+      const finalLockers = await Locker.find().lean();
+      return res.json({
+        success: true,
+        lockers: finalLockers.map((l) => ({
+          lockerId: l.lockerId,
+          status: l.status,
+          ownerId: l.ownerId ? l.ownerId.toString() : null,
+        })),
+      });
+    } catch (err) {
+      return res.status(500).json({
+        success: false,
+        error: "Lỗi khi tải trạng thái tủ: " + err.message,
+      });
+    }
+  }
+
+  // POST /lockers/update  (log LOCKED)
+  async update(req, res) {
+    try {
+      const { lockerId, status } = req.body;
+      const ownerId = req.body.ownerId
+        ? new mongoose.Types.ObjectId(req.body.ownerId)
+        : null;
+
+      if (status === "LOCKED") {
+        const current = await Locker.findOne({ lockerId }).lean();
+        if (current && current.ownerId) {
+          await new History({
+            userId: current.ownerId,
+            lockerId,
+            action: "LOCKED",
+          }).save();
+        }
+      }
+
+      const updated = await Locker.findOneAndUpdate(
+        { lockerId },
+        { status, ownerId, timestamp: new Date() },
+        { new: true }
+      ).lean();
+
+      if (!updated) {
+        return res
+          .status(404)
+          .json({ success: false, error: "Không tìm thấy tủ: " + lockerId });
+      }
+
+      return res.json({
+        success: true,
+        locker: {
+          lockerId: updated.lockerId,
+          status: updated.status,
+          ownerId: updated.ownerId ? updated.ownerId.toString() : null,
+        },
+      });
+    } catch (err) {
+      if (err instanceof mongoose.Error.CastError) {
+        return res.status(400).json({ error: "Invalid owner ID format" });
+      }
+      return res.status(500).json({
+        success: false,
+        error: "Lỗi khi cập nhật trạng thái tủ: " + err.message,
+      });
+    }
+  }
+}
+
+export default new LockerController();
