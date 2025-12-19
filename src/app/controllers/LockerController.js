@@ -1,10 +1,9 @@
-// server/src/app/controllers/LockerController.js
 import mongoose from "mongoose";
 import Locker from "../models/Locker.js";
 import History from "../models/History.js";
 
 class LockerController {
-  // GET /lockers/status  (01-06)
+  // GET /lockers/status
   async status(req, res) {
     try {
       const all = await Locker.find().lean();
@@ -39,7 +38,7 @@ class LockerController {
     }
   }
 
-  // POST /lockers/update  (log LOCKED)
+  // POST /lockers/update
   async update(req, res) {
     try {
       const { lockerId, status } = req.body;

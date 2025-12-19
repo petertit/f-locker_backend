@@ -8,7 +8,7 @@ export default function route(app) {
   app.use("/", siteRouter);
 
   // API
-  app.use("/", authRouter); // /register /login /update /user/:id /history/:userId
-  app.use("/", lockerRouter); // /lockers/status /lockers/update
-  app.use("/", raspiRouter); // /raspi/*
+  app.use("/", authRouter);
+  app.use("/", lockerRouter);
+  app.use("/", raspiRouter);
 }
