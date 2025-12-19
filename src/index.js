@@ -24,11 +24,9 @@ const app = express();
 app.use(
   cors({
     origin: [
-      "http://localhost:5500",
-      "http://127.0.0.1:5500",
+      "http://localhost:4000",
+      "http://127.0.0.1:4000",
       "https://f-lock-frontend.pages.dev",
-      "https://petertit.github.io",
-      "https://<custom-domain-cua-ban>",
     ],
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   })
