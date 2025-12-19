@@ -45,10 +45,6 @@ class AuthController {
         userId: acc._id,
         action: "REGISTERED",
       }).save();
-
-      // ✅ FIX theo yêu cầu của bạn:
-      // Đăng ký xong KHÔNG auto-login nữa -> frontend sẽ redirect về logon để login.
-      // Backend chỉ trả user minimal (hoặc full user đều được). Giữ giống bản cũ.
       return res.json({
         message: "✅ Đăng ký thành công",
         user: prepareUser(acc),

@@ -4,9 +4,9 @@ import raspiRouter from "./raspi.js";
 import siteRouter from "./site.js";
 
 export default function route(app) {
-  app.use("/api/auth", authRouter);
-  app.use("/api/locker", lockerRouter);
-  app.use("/api/raspi", raspiRouter);
+  app.use("/", authRouter);
+  app.use("/", lockerRouter);
+  app.use("/", raspiRouter);
 
   app.use("/", siteRouter);
 }
