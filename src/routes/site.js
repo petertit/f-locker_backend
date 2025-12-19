@@ -1,4 +1,3 @@
-// server/src/routes/site.js
 import express from "express";
 import SiteController from "../app/controllers/SiteController.js";
 

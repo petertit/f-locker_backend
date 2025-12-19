@@ -1,49 +1,40 @@
-// server/src/index.js
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
-import methodOverride from "method-override";
-import morgan from "morgan";
 
-import db from "./config/db/index.js";
 import route from "./routes/index.js";
-
-import path from "path";
-import { fileURLToPath } from "url";
-
-// const __filename = fileURLToPath(import.meta.url);
-// const __dirname = path.dirname(__filename);
-
-// app.use(express.static(path.join(__dirname, "..", "..", "frontend")));
+import connectDB from "./config/db/index.js";
 
 dotenv.config();
 
 const app = express();
-
-// Middlewares
 app.use(
   cors({
     origin: [
-      "http://localhost:4000",
-      "http://127.0.0.1:4000",
       "https://f-lock-frontend.pages.dev",
+      "http://localhost:5500",
+      "http://127.0.0.1:5500",
     ],
-    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    credentials: true,
   })
 );
-app.use(express.json({ limit: "10mb" }));
+//middleware
+app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-app.use(methodOverride("_method"));
-app.use(morgan("dev"));
-
-// Connect DB
-await db.connect();
-
-// Routes
+//route init
 route(app);
 
-// Start server
 const PORT = process.env.PORT || 4000;
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-});
+// mongDB
+connectDB()
+  .then(() => {
+    app.listen(PORT, () => {
+      console.log("✅ Connected to MongoDB Atlas");
+      console.log(`🚀 Server running on port ${PORT}`);
+    });
+  })
+  .catch((err) => {
+    console.error("❌ MongoDB connection error:", err.message);
+    process.exit(1);
+  });

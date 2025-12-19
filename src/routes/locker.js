@@ -3,7 +3,10 @@ import LockerController from "../app/controllers/LockerController.js";
 
 const router = express.Router();
 
-router.get("/lockers/status", (req, res) => LockerController.status(req, res));
-router.post("/lockers/update", (req, res) => LockerController.update(req, res));
+// GET /api/lockers/status
+router.get("/status", (req, res) => LockerController.status(req, res));
+
+// POST /api/lockers/update
+router.post("/update", (req, res) => LockerController.update(req, res));
 
 export default router;

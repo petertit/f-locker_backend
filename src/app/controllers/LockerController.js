@@ -3,7 +3,7 @@ import Locker from "../models/Locker.js";
 import History from "../models/History.js";
 
 class LockerController {
-  // GET /lockers/status
+  // GET /api/lockers/status
   async status(req, res) {
     try {
       const all = await Locker.find().lean();
@@ -38,14 +38,15 @@ class LockerController {
     }
   }
 
-  // POST /lockers/update
+  // POST /api/lockers/update
   async update(req, res) {
     try {
       const { lockerId, status } = req.body;
+
       const ownerId = req.body.ownerId
         ? new mongoose.Types.ObjectId(req.body.ownerId)
         : null;
-
+      // history
       if (status === "LOCKED") {
         const current = await Locker.findOne({ lockerId }).lean();
         if (current && current.ownerId) {
@@ -79,7 +80,9 @@ class LockerController {
       });
     } catch (err) {
       if (err instanceof mongoose.Error.CastError) {
-        return res.status(400).json({ error: "Invalid owner ID format" });
+        return res
+          .status(400)
+          .json({ success: false, error: "Invalid owner ID format" });
       }
       return res.status(500).json({
         success: false,

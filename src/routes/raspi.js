@@ -1,4 +1,3 @@
-// server/src/routes/raspi.js
 import express from "express";
 import RaspiController from "../app/controllers/RaspiController.js";
 
