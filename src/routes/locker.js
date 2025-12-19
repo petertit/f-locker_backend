@@ -1,4 +1,3 @@
-// server/src/routes/locker.js
 import express from "express";
 import LockerController from "../app/controllers/LockerController.js";
 
