@@ -1,4 +1,3 @@
-// server/src/routes/index.js
 import authRouter from "./auth.js";
 import lockerRouter from "./locker.js";
 import raspiRouter from "./raspi.js";
