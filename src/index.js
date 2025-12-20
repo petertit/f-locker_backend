@@ -36,7 +36,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use(morgan("dev"));
 
 // health check
-app.get("/", (req, res) => {
+app.get("/.*/", (req, res) => {
   res.json({ ok: true, message: "F-LOCK backend is running ✅" });
 });
 
