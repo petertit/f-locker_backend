@@ -1,17 +1,16 @@
-// src/index.js
 import express from "express";
 import cors from "cors";
 import morgan from "morgan";
 import dotenv from "dotenv";
 
 import route from "./routes/index.js";
-import connectDB from "./config/db/index.js"; // đảm bảo file này export default function
+import connectDB from "./config/db/index.js";
 
 dotenv.config();
 
 const app = express();
 
-//CORS
+// ✅ CORS
 const allowedOrigins = [
   "https://f-lock-frontend.pages.dev",
   "http://localhost:5500",
@@ -22,27 +21,36 @@ const allowedOrigins = [
 const corsOptions = {
   origin: function (origin, cb) {
     if (!origin) return cb(null, true);
+
     if (allowedOrigins.includes(origin)) return cb(null, true);
     return cb(new Error("Not allowed by CORS: " + origin));
   },
+  credentials: true,
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"],
 };
 
 app.use(cors(corsOptions));
+
+app.options("*", cors(corsOptions));
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(morgan("dev"));
 
-// health check
-app.get("/.*/", (req, res) => {
+// ✅ health check
+app.get("/", (req, res) => {
   res.json({ ok: true, message: "F-LOCK backend is running ✅" });
 });
 
-// routes
+// ✅ API routes
 route(app);
 
-// start
+// ✅ 404 handler
+app.use((req, res) => {
+  return res.status(404).json({ ok: false, message: "Not Found" });
+});
+
 const PORT = process.env.PORT || 4000;
 
 (async () => {
