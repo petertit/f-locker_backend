@@ -1,5 +1,5 @@
 // src/app/controllers/RaspiController.js
-import * as raspiService from "../services/raspi_service.js";
+import * as raspiService from "../../services/raspi_service.js";
 
 class RaspiController {
   // GET /raspi/status
