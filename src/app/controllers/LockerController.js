@@ -7,8 +7,6 @@ class LockerController {
   async status(req, res) {
     try {
       const all = await Locker.find().lean();
-
-      // init 6 lockers
       for (let i = 1; i <= 6; i++) {
         const id = i.toString().padStart(2, "0");
         const exists = all.find((l) => l.lockerId === id);
