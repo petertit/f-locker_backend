@@ -18,6 +18,7 @@
     "dotenv": "^17.2.3",
     "express": "^5.2.1",
     "express-handlebars": "^8.0.4",
+    "jsonwebtoken": "^9.0.3",
     "method-override": "^3.0.0",
     "mongoose": "^8.20.3",
     "mongoose-delete": "^1.0.7",
