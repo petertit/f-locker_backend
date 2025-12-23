@@ -2,7 +2,16 @@
 import mongoose from "mongoose";
 import User from "../models/User.js";
 import History from "../models/History.js";
+import jwt from "jsonwebtoken";
+import Account from "../models/User.js";
 
+function signToken(user) {
+  return jwt.sign(
+    { sub: user._id.toString(), email: user.email },
+    process.env.JWT_SECRET,
+    { expiresIn: process.env.JWT_EXPIRES || "7d" }
+  );
+}
 const prepareUser = (acc) => {
   if (!acc) return null;
   const obj = acc.toObject ? acc.toObject() : acc;
@@ -57,16 +66,32 @@ class AuthController {
   // POST /login
   async login(req, res) {
     try {
-      const { password } = req.body;
-      const email = req.body.email ? req.body.email.toLowerCase() : null;
+      const { email, password } = req.body || {};
+      if (!email || !password) {
+        return res.status(400).json({ error: "Missing email/password" });
+      }
 
-      const acc = await User.findOne({ email, password }).lean();
-      if (!acc)
-        return res.status(401).json({ error: "Sai thông tin đăng nhập" });
+      const user = await Account.findOne({ email }).lean();
+      if (!user) return res.status(401).json({ error: "Email not found" });
 
+      // ⚠️ Nếu bạn đang dùng bcrypt: thay bằng bcrypt.compare(password, user.password)
+      const ok = String(user.password) === String(password);
+      if (!ok) return res.status(401).json({ error: "Wrong password" });
+
+      const token = signToken(user);
+
+      // Trả user "safe" (không trả password)
       return res.json({
-        message: "✅ Đăng nhập thành công",
-        user: prepareUser(acc),
+        success: true,
+        token,
+        user: {
+          _id: user._id,
+          name: user.name,
+          email: user.email,
+          phone: user.phone || null,
+          hint: user.hint || null,
+          registeredLocker: user.registeredLocker ?? null,
+        },
       });
     } catch (err) {
       return res.status(500).json({ error: err.message });
