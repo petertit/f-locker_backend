@@ -1,3 +1,4 @@
+// src/index.js
 import express from "express";
 import cors from "cors";
 import morgan from "morgan";
@@ -10,22 +11,36 @@ dotenv.config();
 
 const app = express();
 
-// ✅ CORS
-const allowedOrigins = [
+// ✅ CORS (allow main domain + preview subdomains + localhost)
+const allowedExactOrigins = new Set([
   "https://f-lock-frontend.pages.dev",
   "http://localhost:5500",
   "http://127.0.0.1:5500",
   "http://localhost:3000",
-];
+]);
+
+function isAllowedOrigin(origin) {
+  if (!origin) return true; // allow curl/postman/server-to-server
+  try {
+    const { hostname, protocol } = new URL(origin);
+    if (!protocol.startsWith("http")) return false;
+
+    // ✅ allow exact origins
+    if (allowedExactOrigins.has(origin)) return true;
+
+    // ✅ allow Cloudflare Pages preview subdomains:
+    // https://bd153ecd.f-lock-frontend.pages.dev
+    if (hostname.endsWith(".f-lock-frontend.pages.dev")) return true;
+
+    return false;
+  } catch {
+    return false;
+  }
+}
 
 const corsOptions = {
-  origin: (origin, cb) => {
-    if (!origin) return cb(null, true);
-
-    // ✅ allow main domain + all cloudflare pages preview
-    const ok = allowedOrigins.includes(origin) || origin.endsWith(".pages.dev");
-
-    if (ok) return cb(null, true);
+  origin: function (origin, cb) {
+    if (isAllowedOrigin(origin)) return cb(null, true);
     return cb(new Error("Not allowed by CORS: " + origin));
   },
   credentials: true,
@@ -33,7 +48,10 @@ const corsOptions = {
   allowedHeaders: ["Content-Type", "Authorization"],
 };
 
+// ⚠️ IMPORTANT: cors phải đặt TRƯỚC routes
 app.use(cors(corsOptions));
+
+// ✅ Preflight (Express v5/path-to-regexp v6 không thích "*")
 app.options(/.*/, cors(corsOptions));
 
 app.use(express.json());
