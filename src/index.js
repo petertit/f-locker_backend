@@ -18,11 +18,27 @@ const allowedOrigins = [
   "http://localhost:3000",
 ];
 
-const corsOptions = {
-  origin: function (origin, cb) {
-    if (!origin) return cb(null, true);
+function isAllowedOrigin(origin) {
+  if (!origin) return true; // postman/curl/server-to-server
 
-    if (allowedOrigins.includes(origin)) return cb(null, true);
+  try {
+    const u = new URL(origin);
+
+    // ✅ allow Cloudflare Pages preview + prod (bdxxxx.f-lock-frontend.pages.dev)
+    if (u.hostname.endsWith(".pages.dev")) return true;
+
+    // ✅ allow explicit list
+    if (allowedOrigins.includes(origin)) return true;
+
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+const corsOptions = {
+  origin: (origin, cb) => {
+    if (isAllowedOrigin(origin)) return cb(null, true);
     return cb(new Error("Not allowed by CORS: " + origin));
   },
   credentials: true,
@@ -31,6 +47,9 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
+
+// ✅ BẮT BUỘC: xử lý preflight cho mọi route (fix lỗi OPTIONS)
+app.options("*", cors(corsOptions));
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
