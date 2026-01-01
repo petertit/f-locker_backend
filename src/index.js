@@ -11,36 +11,29 @@ dotenv.config();
 
 const app = express();
 
-// ✅ CORS (allow main domain + preview subdomains + localhost)
-const allowedExactOrigins = new Set([
+// ✅ CORS: cho cả domain chính và preview kiểu bd153ecd.f-lock-frontend.pages.dev
+const allowedOrigins = [
   "https://f-lock-frontend.pages.dev",
   "http://localhost:5500",
   "http://127.0.0.1:5500",
   "http://localhost:3000",
-]);
+];
 
-function isAllowedOrigin(origin) {
-  if (!origin) return true; // allow curl/postman/server-to-server
-  try {
-    const { hostname, protocol } = new URL(origin);
-    if (!protocol.startsWith("http")) return false;
+function isAllowed(origin) {
+  if (!origin) return true;
 
-    // ✅ allow exact origins
-    if (allowedExactOrigins.has(origin)) return true;
+  if (allowedOrigins.includes(origin)) return true;
 
-    // ✅ allow Cloudflare Pages preview subdomains:
-    // https://bd153ecd.f-lock-frontend.pages.dev
-    if (hostname.endsWith(".f-lock-frontend.pages.dev")) return true;
+  // allow preview: https://xxxx.f-lock-frontend.pages.dev
+  if (/^https:\/\/[a-z0-9-]+\.f-lock-frontend\.pages\.dev$/i.test(origin))
+    return true;
 
-    return false;
-  } catch {
-    return false;
-  }
+  return false;
 }
 
 const corsOptions = {
   origin: function (origin, cb) {
-    if (isAllowedOrigin(origin)) return cb(null, true);
+    if (isAllowed(origin)) return cb(null, true);
     return cb(new Error("Not allowed by CORS: " + origin));
   },
   credentials: true,
@@ -48,14 +41,12 @@ const corsOptions = {
   allowedHeaders: ["Content-Type", "Authorization"],
 };
 
-// ⚠️ IMPORTANT: cors phải đặt TRƯỚC routes
 app.use(cors(corsOptions));
 
-// ✅ Preflight (Express v5/path-to-regexp v6 không thích "*")
-app.options(/.*/, cors(corsOptions));
+// ✅ FIX 413: tăng limit cho JSON/base64
+app.use(express.json({ limit: "6mb" }));
+app.use(express.urlencoded({ extended: true, limit: "6mb" }));
 
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
 app.use(morgan("dev"));
 
 // ✅ health check

@@ -7,7 +7,11 @@ class RaspiController {
       const data = await raspiService.forwardGet("/status");
       return res.json({ success: true, data });
     } catch (err) {
-      return res.status(502).json({ success: false, error: err.message });
+      return res.status(err.status || 502).json({
+        success: false,
+        error: err.message,
+        detail: err.data || null,
+      });
     }
   }
 
@@ -16,7 +20,11 @@ class RaspiController {
       const data = await raspiService.forwardPost("/unlock", req.body);
       return res.json({ success: true, data });
     } catch (err) {
-      return res.status(502).json({ success: false, error: err.message });
+      return res.status(err.status || 502).json({
+        success: false,
+        error: err.message,
+        detail: err.data || null,
+      });
     }
   }
 
@@ -25,48 +33,43 @@ class RaspiController {
       const data = await raspiService.forwardPost("/lock", req.body);
       return res.json({ success: true, data });
     } catch (err) {
-      return res.status(502).json({ success: false, error: err.message });
+      return res.status(err.status || 502).json({
+        success: false,
+        error: err.message,
+        detail: err.data || null,
+      });
     }
   }
 
-  // ✅ Nhận diện trực tiếp từ Raspi (camera Raspi)
-  async recognize(req, res) {
+  // optional (nếu raspi bạn có endpoint /capture)
+  async capture(req, res) {
     try {
-      const data = await raspiService.forwardPost("/recognize", req.body || {});
-      return res.json({ success: true, ...data });
+      const data = await raspiService.forwardPost("/capture", req.body);
+      return res.json({ success: true, data });
     } catch (err) {
-      return res.status(502).json({ success: false, error: err.message });
+      return res.status(err.status || 502).json({
+        success: false,
+        error: err.message,
+        detail: err.data || null,
+      });
     }
   }
 
-  // ✅ Nhận diện từ ảnh base64 gửi lên (camera web/phone)
+  // ✅ FIX: endpoint nhận diện từ browser (base64)
   async recognizeRemote(req, res) {
     try {
+      // body mong đợi: { imageBase64, lockerId, userId/email }
       const data = await raspiService.forwardPost(
         "/recognize-remote",
         req.body
       );
-      return res.json({ success: true, ...data });
+      return res.json({ success: true, data });
     } catch (err) {
-      return res.status(502).json({ success: false, error: err.message });
-    }
-  }
-
-  async capture(req, res) {
-    try {
-      const data = await raspiService.forwardPost("/capture", req.body);
-      return res.json({ success: true, ...data });
-    } catch (err) {
-      return res.status(502).json({ success: false, error: err.message });
-    }
-  }
-
-  async record(req, res) {
-    try {
-      const data = await raspiService.forwardPost("/record", req.body);
-      return res.json({ success: true, ...data });
-    } catch (err) {
-      return res.status(502).json({ success: false, error: err.message });
+      return res.status(err.status || 502).json({
+        success: false,
+        error: err.message,
+        detail: err.data || null,
+      });
     }
   }
 }

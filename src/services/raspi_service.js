@@ -1,58 +1,65 @@
 // src/services/raspi_service.js
-// Node 18+ (Render Node v22) có fetch built-in => KHÔNG cần node-fetch
+// Node 18+ (Render Node 22) có global fetch => KHÔNG cần node-fetch
 
-const RASPI_BASE = process.env.RASPI_URL;
+const RASPI_BASE = (process.env.RASPI_URL || "").replace(/\/+$/, "");
 
-function ensureBase() {
-  if (!RASPI_BASE) throw new Error("Missing RASPI_URL in .env");
+if (!RASPI_BASE) {
+  console.warn("⚠️ Missing RASPI_URL in env. Raspi forward will fail.");
 }
 
-function joinUrl(path = "") {
-  ensureBase();
-  const base = String(RASPI_BASE).replace(/\/+$/, "");
-  const p = String(path).startsWith("/") ? path : `/${path}`;
-  return `${base}${p}`;
-}
+async function forward(method, path, body, extra = {}) {
+  const url = `${RASPI_BASE}${path.startsWith("/") ? path : `/${path}`}`;
 
-async function parseResponse(res) {
-  const ct = res.headers.get("content-type") || "";
-  if (ct.includes("application/json")) return await res.json();
-  const text = await res.text();
-  // nếu Raspi trả HTML/error text thì vẫn trả về dạng object cho dễ debug
-  return { raw: text };
-}
+  const headers = { ...(extra.headers || {}) };
 
-export async function forwardGet(path) {
-  const url = joinUrl(path);
-  const res = await fetch(url, { method: "GET" });
-  const data = await parseResponse(res);
+  const controller = new AbortController();
+  const timeoutMs = extra.timeoutMs ?? 15000;
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
 
-  if (!res.ok) {
-    const msg =
-      data?.error || data?.message || `Raspi GET failed (${res.status})`;
-    throw new Error(msg);
+  try {
+    const opts = {
+      method,
+      headers,
+      signal: controller.signal,
+    };
+
+    if (body !== undefined) {
+      if (!headers["Content-Type"])
+        headers["Content-Type"] = "application/json";
+      opts.body = typeof body === "string" ? body : JSON.stringify(body);
+    }
+
+    const res = await fetch(url, opts);
+
+    const text = await res.text();
+    let data;
+    try {
+      data = text ? JSON.parse(text) : {};
+    } catch {
+      data = { raw: text };
+    }
+
+    if (!res.ok) {
+      const msg = data?.error || data?.message || `HTTP ${res.status}`;
+      const err = new Error(msg);
+      err.status = res.status;
+      err.data = data;
+      throw err;
+    }
+
+    return data;
+  } finally {
+    clearTimeout(timer);
   }
-  return data;
 }
 
-export async function forwardPost(path, body = {}) {
-  const url = joinUrl(path);
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body || {}),
-  });
-  const data = await parseResponse(res);
-
-  if (!res.ok) {
-    const msg =
-      data?.error || data?.message || `Raspi POST failed (${res.status})`;
-    throw new Error(msg);
-  }
-  return data;
+export async function forwardGet(path, extra) {
+  return forward("GET", path, undefined, extra);
 }
 
-// ✅ để kiểu import nào cũng chạy:
-// import raspiService from "../services/raspi_service.js"
-// hoặc import * as raspiService ...
+export async function forwardPost(path, body, extra) {
+  return forward("POST", path, body, extra);
+}
+
+// ✅ export default để controller dùng raspiService.forwardPost(...)
 export default { forwardGet, forwardPost };
