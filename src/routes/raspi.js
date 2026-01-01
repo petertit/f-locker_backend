@@ -1,20 +1,32 @@
+// src/routes/raspi.js
 import express from "express";
 import RaspiController from "../app/controllers/RaspiController.js";
+import authUser from "../app/middlewares/auth_user.js";
 
 const router = express.Router();
 
-// status
-router.get("/status", RaspiController.status);
+// Nếu bạn muốn bảo vệ bằng JWT user => bật authUser
+router.use(authUser);
 
-// open / close
-router.post("/unlock", RaspiController.unlock);
-router.post("/lock", RaspiController.lock);
+// GET /raspi/status
+router.get("/status", (req, res) => RaspiController.status(req, res));
 
-// face features
-router.post("/capture", RaspiController.capture);
-router.post("/record", RaspiController.record);
+// POST /raspi/unlock
+router.post("/unlock", (req, res) => RaspiController.unlock(req, res));
 
-// ✅ QUAN TRỌNG: endpoint frontend đang gọi
-router.post("/recognize-remote", RaspiController.recognizeRemote);
+// POST /raspi/lock
+router.post("/lock", (req, res) => RaspiController.lock(req, res));
+
+// ✅ POST /raspi/recognize
+router.post("/recognize", (req, res) => RaspiController.recognize(req, res));
+
+// ✅ POST /raspi/recognize-remote
+router.post("/recognize-remote", (req, res) =>
+  RaspiController.recognizeRemote(req, res)
+);
+
+// optional
+router.post("/capture", (req, res) => RaspiController.capture(req, res));
+router.post("/record", (req, res) => RaspiController.record(req, res));
 
 export default router;

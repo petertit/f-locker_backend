@@ -1,40 +1,58 @@
 // src/services/raspi_service.js
-// Node 18+ đã có fetch global → KHÔNG import node-fetch
+// Node 18+ (Render Node v22) có fetch built-in => KHÔNG cần node-fetch
 
-const RASPI_URL = process.env.RASPI_URL;
+const RASPI_BASE = process.env.RASPI_URL;
 
-if (!RASPI_URL) {
-  throw new Error("❌ Missing RASPI_URL in environment variables");
+function ensureBase() {
+  if (!RASPI_BASE) throw new Error("Missing RASPI_URL in .env");
 }
 
-async function forwardPost(path, body) {
-  const res = await fetch(`${RASPI_URL}${path}`, {
+function joinUrl(path = "") {
+  ensureBase();
+  const base = String(RASPI_BASE).replace(/\/+$/, "");
+  const p = String(path).startsWith("/") ? path : `/${path}`;
+  return `${base}${p}`;
+}
+
+async function parseResponse(res) {
+  const ct = res.headers.get("content-type") || "";
+  if (ct.includes("application/json")) return await res.json();
+  const text = await res.text();
+  // nếu Raspi trả HTML/error text thì vẫn trả về dạng object cho dễ debug
+  return { raw: text };
+}
+
+export async function forwardGet(path) {
+  const url = joinUrl(path);
+  const res = await fetch(url, { method: "GET" });
+  const data = await parseResponse(res);
+
+  if (!res.ok) {
+    const msg =
+      data?.error || data?.message || `Raspi GET failed (${res.status})`;
+    throw new Error(msg);
+  }
+  return data;
+}
+
+export async function forwardPost(path, body = {}) {
+  const url = joinUrl(path);
+  const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
+    body: JSON.stringify(body || {}),
   });
-
-  const data = await res.json().catch(() => ({}));
+  const data = await parseResponse(res);
 
   if (!res.ok) {
-    throw new Error(data?.error || `Raspi POST ${path} failed`);
+    const msg =
+      data?.error || data?.message || `Raspi POST failed (${res.status})`;
+    throw new Error(msg);
   }
-
   return data;
 }
 
-async function forwardGet(path) {
-  const res = await fetch(`${RASPI_URL}${path}`);
-  const data = await res.json().catch(() => ({}));
-
-  if (!res.ok) {
-    throw new Error(data?.error || `Raspi GET ${path} failed`);
-  }
-
-  return data;
-}
-
-export default {
-  forwardPost,
-  forwardGet,
-};
+// ✅ để kiểu import nào cũng chạy:
+// import raspiService from "../services/raspi_service.js"
+// hoặc import * as raspiService ...
+export default { forwardGet, forwardPost };
