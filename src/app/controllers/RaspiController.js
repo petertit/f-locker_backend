@@ -1,102 +1,96 @@
-// src/app/controllers/RaspiController.js
-
-import FormData from "form-data";
-import fetch from "node-fetch"; // nếu Node < 18
-// Nếu Node >= 18 thì có thể bỏ import này
-
-const RASPI_URL = process.env.RASPI_URL;
+// server/src/app/controllers/RaspiController.js
+import raspiService from "../services/raspi_service.js";
 
 class RaspiController {
-  /**
-   * POST /raspi/recognize-remote
-   * multipart/form-data:
-   *  - image: file (jpeg)
-   *  - lockerId?: string
-   */
+  async status(req, res) {
+    try {
+      const data = await raspiService.forwardGet("/status");
+      return res.json(data);
+    } catch (err) {
+      return res.status(500).json({ success: false, error: err.message });
+    }
+  }
+
+  async unlock(req, res) {
+    try {
+      const data = await raspiService.forwardPost("/unlock", req.body);
+      return res.json(data);
+    } catch (err) {
+      return res.status(500).json({ success: false, error: err.message });
+    }
+  }
+
+  async lock(req, res) {
+    try {
+      const data = await raspiService.forwardPost("/lock", req.body);
+      return res.json(data);
+    } catch (err) {
+      return res.status(500).json({ success: false, error: err.message });
+    }
+  }
+
+  // ✅ POST /raspi/recognize-remote
+  // nhận ảnh từ frontend (multer), forward sang Raspi để nhận diện
   async recognizeRemote(req, res) {
     try {
-      // ===== 1. Validate =====
-      if (!req.file) {
-        return res.status(400).json({
-          success: false,
-          error: "Missing image file",
-        });
+      if (!req.file || !req.file.buffer) {
+        return res
+          .status(400)
+          .json({ success: false, error: "Missing image file (field: image)" });
       }
 
-      if (!RASPI_URL) {
-        return res.status(500).json({
-          success: false,
-          error: "RASPI_URL not configured",
-        });
-      }
+      const lockerId = req.body?.lockerId || null;
 
-      const lockerId = req.body.lockerId || null;
+      // ✅ forward multipart lên Raspi bằng FormData native (Node 18+ / 22 OK)
+      const fd = new FormData();
+      fd.append(
+        "image",
+        new Blob([req.file.buffer], {
+          type: req.file.mimetype || "image/jpeg",
+        }),
+        "frame.jpg"
+      );
+      if (lockerId) fd.append("lockerId", String(lockerId));
 
-      // ===== 2. Build form-data gửi sang Raspi =====
-      const form = new FormData();
+      // timeout để tránh treo
+      const controller = new AbortController();
+      const t = setTimeout(() => controller.abort(), 12000);
 
-      form.append("image", req.file.buffer, {
-        filename: "frame.jpg",
-        contentType: req.file.mimetype || "image/jpeg",
-      });
-
-      if (lockerId) {
-        form.append("lockerId", lockerId);
-      }
-
-      // ===== 3. Forward sang Raspberry Pi =====
-      const raspiRes = await fetch(`${RASPI_URL}/recognize`, {
+      const raspiRes = await fetch(`${process.env.RASPI_URL}/recognize`, {
         method: "POST",
-        body: form,
-        headers: {
-          ...form.getHeaders(), // ⚠️ CỰC KỲ QUAN TRỌNG
-        },
-        timeout: 10_000, // 10s
-      });
+        body: fd,
+        signal: controller.signal,
+      }).finally(() => clearTimeout(t));
 
-      // ===== 4. Đọc response Raspi =====
-      const contentType = raspiRes.headers.get("content-type") || "";
+      const ct = raspiRes.headers.get("content-type") || "";
+      const text = await raspiRes.text();
 
-      let raspiData;
-      if (contentType.includes("application/json")) {
-        raspiData = await raspiRes.json();
-      } else {
-        const text = await raspiRes.text();
-        throw new Error("Raspi response not JSON: " + text.slice(0, 100));
-      }
-
-      // ===== 5. Raspi báo lỗi =====
       if (!raspiRes.ok) {
         return res.status(502).json({
           success: false,
-          error: "Raspi error",
-          raspi: raspiData,
+          error: `Raspi recognize failed: HTTP ${raspiRes.status}`,
+          detail: text?.slice(0, 300),
         });
       }
 
-      /**
-       * Giả sử Raspi trả:
-       * {
-       *   matched: true,
-       *   lockerId: "06",
-       *   confidence: 0.92
-       * }
-       */
+      // Raspi trả JSON
+      if (ct.includes("application/json")) {
+        const data = JSON.parse(text || "{}");
+        return res.json(data);
+      }
 
-      // ===== 6. Thành công =====
-      return res.json({
-        success: true,
-        matched: raspiData.matched === true,
-        lockerId: raspiData.lockerId || lockerId,
-        confidence: raspiData.confidence || null,
+      // Raspi trả không phải JSON
+      return res.status(502).json({
+        success: false,
+        error: "Raspi response is not JSON",
+        detail: text?.slice(0, 300),
       });
     } catch (err) {
-      console.error("❌ recognizeRemote error:", err);
-
-      return res.status(500).json({
-        success: false,
-        error: err.message || "Internal Server Error",
-      });
+      const msg =
+        err.name === "AbortError"
+          ? "Raspi recognize timeout"
+          : err.message || "Unknown error";
+      return res.status(500).json({ success: false, error: msg });
     }
   }
 }
