@@ -1,109 +1,68 @@
-// src/services/raspi_service.js
-// Dùng fetch/FormData/Blob có sẵn trong Node 18+ (Node 22 OK)
-// Không dùng node-fetch, form-data
+// Node 22+ có fetch sẵn, KHÔNG cần node-fetch
+const RASPI_BASE = process.env.RASPI_BASE_URL || process.env.RASPI_URL || "";
 
-function joinUrl(base, path) {
-  const b = String(base || "").replace(/\/+$/, "");
-  const p = String(path || "").replace(/^\/+/, "");
-  return `${b}/${p}`;
-}
-
-async function safeReadText(res) {
-  try {
-    return await res.text();
-  } catch {
-    return "";
+function ensureBase() {
+  if (!RASPI_BASE) {
+    throw new Error("Missing RASPI_BASE_URL (or RASPI_URL) in .env");
   }
 }
 
-async function safeReadJson(res) {
+async function postJson(path, bodyObj, timeoutMs = 12000) {
+  ensureBase();
+
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeoutMs);
+
   try {
-    return await res.json();
+    const url = `${RASPI_BASE}${path.startsWith("/") ? path : `/${path}`}`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(bodyObj || {}),
+      signal: ctrl.signal,
+    });
+
+    const ct = res.headers.get("content-type") || "";
+    const text = await res.text().catch(() => "");
+
+    // Raspi đôi khi trả HTML lỗi -> vẫn trả về text để debug
+    if (!res.ok) {
+      return {
+        ok: false,
+        status: res.status,
+        data: ct.includes("application/json") ? safeJson(text) : null,
+        text: text?.slice(0, 500) || "",
+      };
+    }
+
+    return {
+      ok: true,
+      status: res.status,
+      data: ct.includes("application/json") ? safeJson(text) : null,
+      text: text?.slice(0, 500) || "",
+    };
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+function safeJson(text) {
+  try {
+    return JSON.parse(text);
   } catch {
     return null;
   }
 }
 
-export default class RaspiService {
-  constructor(baseUrl) {
-    this.baseUrl =
-      baseUrl || process.env.RASPI_BASE_URL || process.env.RASPI_URL || ""; // BẮT BUỘC set env này trỏ tới Raspi API
-  }
+// ===== Public API =====
+const raspiService = {
+  lock: (lockerId, user) => postJson("/lock", { lockerId, user }),
+  unlock: (lockerId, user) => postJson("/unlock", { lockerId, user }),
 
-  assertBaseUrl() {
-    if (!this.baseUrl) {
-      throw new Error(
-        "Missing RASPI_BASE_URL (or RASPI_URL). Please set it to your Raspberry Pi API base URL."
-      );
-    }
-  }
+  // Raspi nhận diện: bạn có thể đổi endpoint nếu raspi của bạn dùng đường khác
+  // Ưu tiên JSON base64 để không cần multer/form-data
+  recognizeRemote: ({ imageBase64, lockerId, user }) =>
+    postJson("/recognize-remote", { imageBase64, lockerId, user }),
+};
 
-  async forwardJson(path, payload, { timeoutMs = 8000, method = "POST" } = {}) {
-    this.assertBaseUrl();
-
-    const url = joinUrl(this.baseUrl, path);
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), timeoutMs);
-
-    try {
-      const res = await fetch(url, {
-        method,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload || {}),
-        signal: ctrl.signal,
-      });
-
-      const ct = (res.headers.get("content-type") || "").toLowerCase();
-      const json = ct.includes("application/json")
-        ? await safeReadJson(res)
-        : null;
-      const text = json ? "" : await safeReadText(res);
-
-      return {
-        ok: res.ok,
-        status: res.status,
-        json,
-        text,
-        url,
-      };
-    } finally {
-      clearTimeout(t);
-    }
-  }
-
-  async forwardFormData(
-    path,
-    formData,
-    { timeoutMs = 12000, method = "POST" } = {}
-  ) {
-    this.assertBaseUrl();
-
-    const url = joinUrl(this.baseUrl, path);
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), timeoutMs);
-
-    try {
-      const res = await fetch(url, {
-        method,
-        body: formData, // KHÔNG set Content-Type
-        signal: ctrl.signal,
-      });
-
-      const ct = (res.headers.get("content-type") || "").toLowerCase();
-      const json = ct.includes("application/json")
-        ? await safeReadJson(res)
-        : null;
-      const text = json ? "" : await safeReadText(res);
-
-      return {
-        ok: res.ok,
-        status: res.status,
-        json,
-        text,
-        url,
-      };
-    } finally {
-      clearTimeout(t);
-    }
-  }
-}
+export default raspiService;

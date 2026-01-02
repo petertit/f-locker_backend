@@ -1,143 +1,106 @@
-// src/app/controllers/RaspiController.js
-import RaspiService from "../../services/raspi_service.js";
-
-const raspiService = new RaspiService();
-
-// ✅ Bạn chỉnh đúng path API của Raspberry Pi ở đây (hoặc set env)
-const PATHS = {
-  lock: process.env.RASPI_LOCK_PATH || "/lock",
-  unlock: process.env.RASPI_UNLOCK_PATH || "/unlock",
-  recognize: process.env.RASPI_RECOGNIZE_PATH || "/recognize", // Raspi API endpoint thật
-};
-
-// Helper: parse JSON body safely
-function getJsonBody(req) {
-  return req.body && typeof req.body === "object" ? req.body : {};
-}
-
-// Helper: Buffer from base64 dataURL or raw base64
-function bufferFromBase64(input) {
-  if (!input) return null;
-  let b64 = String(input);
-
-  // data:image/jpeg;base64,...
-  const m = b64.match(/^data:.*?;base64,(.+)$/);
-  if (m) b64 = m[1];
-
-  try {
-    return Buffer.from(b64, "base64");
-  } catch {
-    return null;
-  }
-}
+import raspiService from "../services/raspi_service.js";
 
 class RaspiController {
-  // POST /raspi/lock
+  async status(req, res) {
+    return res.json({ success: true, ok: true });
+  }
+
   async lock(req, res) {
     try {
-      const { lockerId, user } = getJsonBody(req);
+      const { lockerId } = req.body || {};
       if (!lockerId)
         return res
           .status(400)
           .json({ success: false, error: "Missing lockerId" });
 
-      const r = await raspiService.forwardJson(PATHS.lock, { lockerId, user });
+      const user = req.user?.email || null;
+      const r = await raspiService.lock(lockerId, user);
 
       if (!r.ok) {
         return res.status(502).json({
           success: false,
           error: "Raspi lock failed",
-          detail: r.json || r.text || `HTTP ${r.status}`,
-          raspiUrl: r.url,
+          detail: r.data || r.text || `HTTP ${r.status}`,
         });
       }
 
-      return res.json({ success: true, data: r.json || { ok: true } });
+      return res.json({ success: true, data: r.data || null });
     } catch (e) {
       return res.status(500).json({ success: false, error: e.message });
     }
   }
 
-  // POST /raspi/unlock
   async unlock(req, res) {
     try {
-      const { lockerId, user } = getJsonBody(req);
+      const { lockerId } = req.body || {};
       if (!lockerId)
         return res
           .status(400)
           .json({ success: false, error: "Missing lockerId" });
 
-      const r = await raspiService.forwardJson(PATHS.unlock, {
-        lockerId,
-        user,
-      });
+      const user = req.user?.email || null;
+      const r = await raspiService.unlock(lockerId, user);
 
       if (!r.ok) {
         return res.status(502).json({
           success: false,
           error: "Raspi unlock failed",
-          detail: r.json || r.text || `HTTP ${r.status}`,
-          raspiUrl: r.url,
+          detail: r.data || r.text || `HTTP ${r.status}`,
         });
       }
 
-      return res.json({ success: true, data: r.json || { ok: true } });
+      return res.json({ success: true, data: r.data || null });
     } catch (e) {
       return res.status(500).json({ success: false, error: e.message });
     }
   }
 
-  /**
-   * POST /raspi/recognize-remote
-   * Frontend gửi JSON:
-   * {
-   *   imageBase64: "data:image/jpeg;base64,..."
-   *   lockerId: "06"
-   * }
-   *
-   * Backend sẽ forward sang Raspi API dạng multipart (FormData)
-   * - field: image (file)
-   * - lockerId (optional)
-   */
+  // ✅ POST /raspi/recognize-remote
   async recognizeRemote(req, res) {
     try {
-      const body = getJsonBody(req);
-      const lockerId = body.lockerId || null;
-      const imageBase64 = body.imageBase64 || body.image || null;
-
+      const { imageBase64, lockerId } = req.body || {};
       if (!imageBase64) {
         return res
           .status(400)
           .json({ success: false, error: "Missing imageBase64" });
       }
 
-      const buf = bufferFromBase64(imageBase64);
-      if (!buf || buf.length < 10) {
+      // basic validate
+      if (
+        typeof imageBase64 !== "string" ||
+        !imageBase64.startsWith("data:image/")
+      ) {
         return res
           .status(400)
-          .json({ success: false, error: "Invalid base64 image" });
+          .json({
+            success: false,
+            error: "imageBase64 must be data:image/* base64 string",
+          });
       }
 
-      // ✅ Build multipart using native FormData/Blob
-      const fd = new FormData();
-      fd.append("image", new Blob([buf], { type: "image/jpeg" }), "frame.jpg");
-      if (lockerId) fd.append("lockerId", String(lockerId));
+      const user = req.user?.email || null;
 
-      const r = await raspiService.forwardFormData(PATHS.recognize, fd, {
-        timeoutMs: 15000,
+      const r = await raspiService.recognizeRemote({
+        imageBase64,
+        lockerId: lockerId || null,
+        user,
       });
 
       if (!r.ok) {
         return res.status(502).json({
           success: false,
           error: "Raspi recognize failed",
-          detail: r.json || r.text || `HTTP ${r.status}`,
-          raspiUrl: r.url,
+          detail: r.data || r.text || `HTTP ${r.status}`,
         });
       }
 
-      // Raspi nên trả JSON: { success:true, matched:true, lockerId:"06" ... }
-      return res.json(r.json || { success: true });
+      // r.data là JSON raspi trả về (matched / success / name / ...)
+      return res.json({
+        success: true,
+        ...(r.data && typeof r.data === "object"
+          ? r.data
+          : { data: r.data ?? null }),
+      });
     } catch (e) {
       return res.status(500).json({ success: false, error: e.message });
     }
