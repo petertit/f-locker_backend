@@ -1,16 +1,14 @@
 import express from "express";
 import multer from "multer";
 import RaspiController from "../app/controllers/RaspiController.js";
-import authUser from "../app/middlewares/auth_user.js"; // ✅ đúng tên
+import authUser from "../app/middlewares/auth_user.js";
 
 const router = express.Router();
 
-// multer: nhận ảnh từ scan.js
+// multer nhận ảnh từ scan.js (FormData)
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: {
-    fileSize: 1_000_000, // 1MB
-  },
+  limits: { fileSize: 1_000_000 }, // 1MB để né 413/treo
 });
 
 // GET /raspi/status
@@ -25,12 +23,12 @@ router.post("/lock", (req, res) => RaspiController.lock(req, res));
 // POST /raspi/capture (optional)
 router.post("/capture", (req, res) => RaspiController.capture(req, res));
 
-// ✅ FACE RECOGNITION (scan.js POST vào đây)
+// ✅ FACE RECOGNITION
 router.post(
   "/recognize-remote",
-  authUser, // ✅ SỬA Ở ĐÂY
-  upload.single("image"), // field name = image
-  RaspiController.recognizeRemote
+  authUser,
+  upload.single("image"), // scan.js phải fd.append("image", ...)
+  (req, res) => RaspiController.recognizeRemote(req, res)
 );
 
 export default router;

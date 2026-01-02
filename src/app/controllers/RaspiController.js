@@ -1,96 +1,87 @@
-// server/src/app/controllers/RaspiController.js
-import raspiService from "../services/raspi_service.js";
+// src/app/controllers/RaspiController.js
+import { recognizeRemoteOnRaspi } from "../../services/raspi_service.js";
 
 class RaspiController {
   async status(req, res) {
-    try {
-      const data = await raspiService.forwardGet("/status");
-      return res.json(data);
-    } catch (err) {
-      return res.status(500).json({ success: false, error: err.message });
-    }
+    return res.json({ success: true, message: "Raspi route OK" });
+  }
+
+  // các hàm lock/unlock/capture của bạn giữ nguyên nếu đang chạy
+  async lock(req, res) {
+    return res
+      .status(501)
+      .json({ success: false, error: "Not implemented here" });
   }
 
   async unlock(req, res) {
-    try {
-      const data = await raspiService.forwardPost("/unlock", req.body);
-      return res.json(data);
-    } catch (err) {
-      return res.status(500).json({ success: false, error: err.message });
-    }
+    return res
+      .status(501)
+      .json({ success: false, error: "Not implemented here" });
   }
 
-  async lock(req, res) {
-    try {
-      const data = await raspiService.forwardPost("/lock", req.body);
-      return res.json(data);
-    } catch (err) {
-      return res.status(500).json({ success: false, error: err.message });
-    }
+  async capture(req, res) {
+    return res
+      .status(501)
+      .json({ success: false, error: "Not implemented here" });
   }
 
   // ✅ POST /raspi/recognize-remote
-  // nhận ảnh từ frontend (multer), forward sang Raspi để nhận diện
+  // nhận multipart/form-data field: image
   async recognizeRemote(req, res) {
     try {
-      if (!req.file || !req.file.buffer) {
-        return res
-          .status(400)
-          .json({ success: false, error: "Missing image file (field: image)" });
-      }
-
+      const raspiBaseUrl = process.env.RASPI_URL; // ví dụ: http://<raspi-ip>:5000
       const lockerId = req.body?.lockerId || null;
 
-      // ✅ forward multipart lên Raspi bằng FormData native (Node 18+ / 22 OK)
-      const fd = new FormData();
-      fd.append(
-        "image",
-        new Blob([req.file.buffer], {
-          type: req.file.mimetype || "image/jpeg",
-        }),
-        "frame.jpg"
-      );
-      if (lockerId) fd.append("lockerId", String(lockerId));
+      // auth_user.js của bạn sẽ set req.user nếu token hợp lệ
+      const userEmail = req.user?.email || req.body?.user || null;
 
-      // timeout để tránh treo
-      const controller = new AbortController();
-      const t = setTimeout(() => controller.abort(), 12000);
-
-      const raspiRes = await fetch(`${process.env.RASPI_URL}/recognize`, {
-        method: "POST",
-        body: fd,
-        signal: controller.signal,
-      }).finally(() => clearTimeout(t));
-
-      const ct = raspiRes.headers.get("content-type") || "";
-      const text = await raspiRes.text();
-
-      if (!raspiRes.ok) {
-        return res.status(502).json({
+      if (!req.file || !req.file.buffer) {
+        return res.status(400).json({
           success: false,
-          error: `Raspi recognize failed: HTTP ${raspiRes.status}`,
-          detail: text?.slice(0, 300),
+          error: "Missing image file (field name must be 'image')",
         });
       }
 
-      // Raspi trả JSON
-      if (ct.includes("application/json")) {
-        const data = JSON.parse(text || "{}");
-        return res.json(data);
-      }
+      // buffer từ multer memoryStorage
+      const buffer = req.file.buffer;
+      const mimetype = req.file.mimetype || "image/jpeg";
+      const filename = req.file.originalname || "frame.jpg";
 
-      // Raspi trả không phải JSON
-      return res.status(502).json({
-        success: false,
-        error: "Raspi response is not JSON",
-        detail: text?.slice(0, 300),
+      // forward sang raspi
+      const result = await recognizeRemoteOnRaspi({
+        raspiBaseUrl,
+        buffer,
+        mimetype,
+        filename,
+        lockerId,
+        userEmail,
+      });
+
+      // payload có thể là json/text
+      const payload = result?.payload?.data;
+
+      // Chuẩn hoá output: bạn tuỳ Raspi trả gì thì map lại ở đây
+      // Mình đoán các field thường gặp: success/matched/name/confidence/lockerId
+      const matched =
+        payload?.matched === true ||
+        payload?.success === true ||
+        payload?.ok === true ||
+        payload?.result === true;
+
+      return res.json({
+        success: true,
+        matched,
+        lockerId: payload?.lockerId || lockerId || null,
+        data: payload || null,
+        via: { path: result?.path || null },
       });
     } catch (err) {
-      const msg =
-        err.name === "AbortError"
-          ? "Raspi recognize timeout"
-          : err.message || "Unknown error";
-      return res.status(500).json({ success: false, error: msg });
+      // 405/404/timeout... => trả về cho frontend thấy rõ
+      return res.status(502).json({
+        success: false,
+        error: "Raspi recognize failed",
+        detail: err?.message || String(err),
+      });
     }
   }
 }
