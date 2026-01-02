@@ -1,74 +1,101 @@
 // src/app/controllers/RaspiController.js
-import raspiService from "../../services/raspi_service.js";
+
+import FormData from "form-data";
+import fetch from "node-fetch"; // nếu Node < 18
+// Nếu Node >= 18 thì có thể bỏ import này
+
+const RASPI_URL = process.env.RASPI_URL;
 
 class RaspiController {
-  async status(req, res) {
-    try {
-      const data = await raspiService.forwardGet("/status");
-      return res.json({ success: true, data });
-    } catch (err) {
-      return res.status(err.status || 502).json({
-        success: false,
-        error: err.message,
-        detail: err.data || null,
-      });
-    }
-  }
-
-  async unlock(req, res) {
-    try {
-      const data = await raspiService.forwardPost("/unlock", req.body);
-      return res.json({ success: true, data });
-    } catch (err) {
-      return res.status(err.status || 502).json({
-        success: false,
-        error: err.message,
-        detail: err.data || null,
-      });
-    }
-  }
-
-  async lock(req, res) {
-    try {
-      const data = await raspiService.forwardPost("/lock", req.body);
-      return res.json({ success: true, data });
-    } catch (err) {
-      return res.status(err.status || 502).json({
-        success: false,
-        error: err.message,
-        detail: err.data || null,
-      });
-    }
-  }
-
-  // optional (nếu raspi bạn có endpoint /capture)
-  async capture(req, res) {
-    try {
-      const data = await raspiService.forwardPost("/capture", req.body);
-      return res.json({ success: true, data });
-    } catch (err) {
-      return res.status(err.status || 502).json({
-        success: false,
-        error: err.message,
-        detail: err.data || null,
-      });
-    }
-  }
-
-  // ✅ FIX: endpoint nhận diện từ browser (base64)
+  /**
+   * POST /raspi/recognize-remote
+   * multipart/form-data:
+   *  - image: file (jpeg)
+   *  - lockerId?: string
+   */
   async recognizeRemote(req, res) {
     try {
-      // body mong đợi: { imageBase64, lockerId, userId/email }
-      const data = await raspiService.forwardPost(
-        "/recognize-remote",
-        req.body
-      );
-      return res.json({ success: true, data });
+      // ===== 1. Validate =====
+      if (!req.file) {
+        return res.status(400).json({
+          success: false,
+          error: "Missing image file",
+        });
+      }
+
+      if (!RASPI_URL) {
+        return res.status(500).json({
+          success: false,
+          error: "RASPI_URL not configured",
+        });
+      }
+
+      const lockerId = req.body.lockerId || null;
+
+      // ===== 2. Build form-data gửi sang Raspi =====
+      const form = new FormData();
+
+      form.append("image", req.file.buffer, {
+        filename: "frame.jpg",
+        contentType: req.file.mimetype || "image/jpeg",
+      });
+
+      if (lockerId) {
+        form.append("lockerId", lockerId);
+      }
+
+      // ===== 3. Forward sang Raspberry Pi =====
+      const raspiRes = await fetch(`${RASPI_URL}/recognize`, {
+        method: "POST",
+        body: form,
+        headers: {
+          ...form.getHeaders(), // ⚠️ CỰC KỲ QUAN TRỌNG
+        },
+        timeout: 10_000, // 10s
+      });
+
+      // ===== 4. Đọc response Raspi =====
+      const contentType = raspiRes.headers.get("content-type") || "";
+
+      let raspiData;
+      if (contentType.includes("application/json")) {
+        raspiData = await raspiRes.json();
+      } else {
+        const text = await raspiRes.text();
+        throw new Error("Raspi response not JSON: " + text.slice(0, 100));
+      }
+
+      // ===== 5. Raspi báo lỗi =====
+      if (!raspiRes.ok) {
+        return res.status(502).json({
+          success: false,
+          error: "Raspi error",
+          raspi: raspiData,
+        });
+      }
+
+      /**
+       * Giả sử Raspi trả:
+       * {
+       *   matched: true,
+       *   lockerId: "06",
+       *   confidence: 0.92
+       * }
+       */
+
+      // ===== 6. Thành công =====
+      return res.json({
+        success: true,
+        matched: raspiData.matched === true,
+        lockerId: raspiData.lockerId || lockerId,
+        confidence: raspiData.confidence || null,
+      });
     } catch (err) {
-      return res.status(err.status || 502).json({
+      console.error("❌ recognizeRemote error:", err);
+
+      return res.status(500).json({
         success: false,
-        error: err.message,
-        detail: err.data || null,
+        error: err.message || "Internal Server Error",
       });
     }
   }
