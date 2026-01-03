@@ -25,4 +25,9 @@ router.post("/capture-remote-batch", authUser, (req, res) =>
   RaspiController.captureRemoteBatch(req, res)
 );
 
+// ✅ NEW: POST /raspi/capture-batch (raspi camera mode)
+router.post("/capture-batch", authUser, (req, res) =>
+  RaspiController.captureBatch(req, res)
+);
+
 export default router;

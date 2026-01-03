@@ -1,8 +1,28 @@
-import raspiService from "../../services/raspi_service.js";
+import raspiService from "../services/raspi_service.js";
+
+function stripDataUrlToBase64(s) {
+  if (!s || typeof s !== "string") return "";
+  // if dataURL => remove prefix
+  if (s.includes("base64,")) return s.split("base64,", 2)[1];
+  // if already pure base64
+  return s;
+}
 
 class RaspiController {
   async status(req, res) {
-    return res.json({ success: true, ok: true });
+    try {
+      const r = await raspiService.status();
+      if (!r.ok) {
+        return res.status(502).json({
+          success: false,
+          error: "Raspi status failed",
+          detail: r.data || r.text || `HTTP ${r.status}`,
+        });
+      }
+      return res.json({ success: true, ...(r.data || {}) });
+    } catch (e) {
+      return res.status(500).json({ success: false, error: e.message });
+    }
   }
 
   async lock(req, res) {
@@ -23,8 +43,7 @@ class RaspiController {
           detail: r.data || r.text || `HTTP ${r.status}`,
         });
       }
-
-      return res.json({ success: true, data: r.data || null });
+      return res.json({ success: true, ...(r.data || {}) });
     } catch (e) {
       return res.status(500).json({ success: false, error: e.message });
     }
@@ -48,36 +67,31 @@ class RaspiController {
           detail: r.data || r.text || `HTTP ${r.status}`,
         });
       }
-
-      return res.json({ success: true, data: r.data || null });
+      return res.json({ success: true, ...(r.data || {}) });
     } catch (e) {
       return res.status(500).json({ success: false, error: e.message });
     }
   }
 
+  // ✅ POST /raspi/recognize-remote
   async recognizeRemote(req, res) {
     try {
       const { imageBase64, lockerId } = req.body || {};
-      if (!imageBase64) {
+      if (!imageBase64)
         return res
           .status(400)
           .json({ success: false, error: "Missing imageBase64" });
-      }
 
-      if (
-        typeof imageBase64 !== "string" ||
-        !imageBase64.startsWith("data:image/")
-      ) {
-        return res.status(400).json({
-          success: false,
-          error: "imageBase64 must be data:image/* base64 string",
-        });
-      }
+      const image_data = stripDataUrlToBase64(imageBase64);
+      if (!image_data)
+        return res
+          .status(400)
+          .json({ success: false, error: "Invalid imageBase64" });
 
       const user = req.user?.email || null;
 
       const r = await raspiService.recognizeRemote({
-        imageBase64,
+        image_data,
         lockerId: lockerId || null,
         user,
       });
@@ -90,34 +104,33 @@ class RaspiController {
         });
       }
 
-      return res.json({
-        success: true,
-        ...(r.data && typeof r.data === "object"
-          ? r.data
-          : { data: r.data ?? null }),
-      });
+      // Raspi returns: {success: bool, name: "..."}
+      return res.json({ success: true, ...(r.data || {}) });
     } catch (e) {
       return res.status(500).json({ success: false, error: e.message });
     }
   }
 
-  // ✅ NEW: POST /raspi/capture-remote-batch
+  // ✅ POST /raspi/capture-remote-batch
   async captureRemoteBatch(req, res) {
     try {
-      const { count, lockerId } = req.body || {};
-      const user = req.user?.email || null;
-
-      // count mặc định 5 (đúng UI "0/5")
-      const n = Number(count ?? 5);
-      if (!Number.isFinite(n) || n <= 0 || n > 20) {
-        return res.status(400).json({
-          success: false,
-          error: "Invalid count (1..20)",
-        });
+      const { name, images_data, lockerId } = req.body || {};
+      if (!name)
+        return res.status(400).json({ success: false, error: "Missing name" });
+      if (!Array.isArray(images_data) || images_data.length !== 5) {
+        return res
+          .status(400)
+          .json({
+            success: false,
+            error: "images_data must be an array of 5 base64 images",
+          });
       }
 
+      const user = req.user?.email || null;
+
       const r = await raspiService.captureRemoteBatch({
-        count: n,
+        name,
+        images_data,
         lockerId: lockerId || null,
         user,
       });
@@ -125,12 +138,41 @@ class RaspiController {
       if (!r.ok) {
         return res.status(502).json({
           success: false,
-          error: "Raspi capture batch failed",
+          error: "Raspi capture/train failed",
           detail: r.data || r.text || `HTTP ${r.status}`,
         });
       }
 
-      return res.json({ success: true, data: r.data || null });
+      return res.json({ success: true, ...(r.data || {}) });
+    } catch (e) {
+      return res.status(500).json({ success: false, error: e.message });
+    }
+  }
+
+  // optional raspi cam mode
+  async captureBatch(req, res) {
+    try {
+      const { name, lockerId } = req.body || {};
+      if (!name)
+        return res.status(400).json({ success: false, error: "Missing name" });
+
+      const user = req.user?.email || null;
+
+      const r = await raspiService.captureBatch({
+        name,
+        lockerId: lockerId || null,
+        user,
+      });
+
+      if (!r.ok) {
+        return res.status(502).json({
+          success: false,
+          error: "Raspi capture/train failed",
+          detail: r.data || r.text || `HTTP ${r.status}`,
+        });
+      }
+
+      return res.json({ success: true, ...(r.data || {}) });
     } catch (e) {
       return res.status(500).json({ success: false, error: e.message });
     }
