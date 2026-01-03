@@ -1,4 +1,4 @@
-import raspiService from "../services/raspi_service.js";
+import raspiService from "../../services/raspi_service.js";
 
 function stripDataUrlToBase64(s) {
   if (!s || typeof s !== "string") return "";
@@ -118,12 +118,10 @@ class RaspiController {
       if (!name)
         return res.status(400).json({ success: false, error: "Missing name" });
       if (!Array.isArray(images_data) || images_data.length !== 5) {
-        return res
-          .status(400)
-          .json({
-            success: false,
-            error: "images_data must be an array of 5 base64 images",
-          });
+        return res.status(400).json({
+          success: false,
+          error: "images_data must be an array of 5 base64 images",
+        });
       }
 
       const user = req.user?.email || null;
