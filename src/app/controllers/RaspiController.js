@@ -1,93 +1,67 @@
-// src/app/controllers/RaspiController.js
-
 import raspiService from "../../services/raspi_service.js";
 
 class RaspiController {
-  // GET /raspi/status
   async status(req, res) {
     return res.json({ success: true, ok: true });
   }
 
-  // POST /raspi/lock
   async lock(req, res) {
     try {
       const { lockerId } = req.body || {};
-
-      if (!lockerId) {
+      if (!lockerId)
         return res
           .status(400)
           .json({ success: false, error: "Missing lockerId" });
-      }
 
       const user = req.user?.email || null;
+      const r = await raspiService.lock(lockerId, user);
 
-      const result = await raspiService.lock(lockerId, user);
-
-      if (!result.ok) {
+      if (!r.ok) {
         return res.status(502).json({
           success: false,
-          error: "Raspberry Pi lock failed",
-          detail: result.data || result.text || `HTTP ${result.status}`,
+          error: "Raspi lock failed",
+          detail: r.data || r.text || `HTTP ${r.status}`,
         });
       }
 
-      return res.json({
-        success: true,
-        data: result.data || null,
-      });
-    } catch (err) {
-      return res.status(500).json({
-        success: false,
-        error: err.message,
-      });
+      return res.json({ success: true, data: r.data || null });
+    } catch (e) {
+      return res.status(500).json({ success: false, error: e.message });
     }
   }
 
-  // POST /raspi/unlock
   async unlock(req, res) {
     try {
       const { lockerId } = req.body || {};
-
-      if (!lockerId) {
+      if (!lockerId)
         return res
           .status(400)
           .json({ success: false, error: "Missing lockerId" });
-      }
 
       const user = req.user?.email || null;
+      const r = await raspiService.unlock(lockerId, user);
 
-      const result = await raspiService.unlock(lockerId, user);
-
-      if (!result.ok) {
+      if (!r.ok) {
         return res.status(502).json({
           success: false,
-          error: "Raspberry Pi unlock failed",
-          detail: result.data || result.text || `HTTP ${result.status}`,
+          error: "Raspi unlock failed",
+          detail: r.data || r.text || `HTTP ${r.status}`,
         });
       }
 
-      return res.json({
-        success: true,
-        data: result.data || null,
-      });
-    } catch (err) {
-      return res.status(500).json({
-        success: false,
-        error: err.message,
-      });
+      return res.json({ success: true, data: r.data || null });
+    } catch (e) {
+      return res.status(500).json({ success: false, error: e.message });
     }
   }
 
-  // POST /raspi/recognize-remote
   async recognizeRemote(req, res) {
     try {
       const { imageBase64, lockerId } = req.body || {};
-
       if (!imageBase64) {
-        return res.status(400).json({
-          success: false,
-          error: "Missing imageBase64",
-        });
+        return res
+          .status(400)
+          .json({ success: false, error: "Missing imageBase64" });
       }
 
       if (
@@ -96,38 +70,69 @@ class RaspiController {
       ) {
         return res.status(400).json({
           success: false,
-          error: "imageBase64 must be a valid data:image/* base64 string",
+          error: "imageBase64 must be data:image/* base64 string",
         });
       }
 
       const user = req.user?.email || null;
 
-      const result = await raspiService.recognizeRemote({
+      const r = await raspiService.recognizeRemote({
         imageBase64,
         lockerId: lockerId || null,
         user,
       });
 
-      if (!result.ok) {
+      if (!r.ok) {
         return res.status(502).json({
           success: false,
-          error: "Raspberry Pi recognize failed",
-          detail: result.data || result.text || `HTTP ${result.status}`,
+          error: "Raspi recognize failed",
+          detail: r.data || r.text || `HTTP ${r.status}`,
         });
       }
 
-      // Raspi có thể trả { success, matched, name, lockerId, ... }
       return res.json({
         success: true,
-        ...(typeof result.data === "object" && result.data !== null
-          ? result.data
-          : { data: result.data || null }),
+        ...(r.data && typeof r.data === "object"
+          ? r.data
+          : { data: r.data ?? null }),
       });
-    } catch (err) {
-      return res.status(500).json({
-        success: false,
-        error: err.message,
+    } catch (e) {
+      return res.status(500).json({ success: false, error: e.message });
+    }
+  }
+
+  // ✅ NEW: POST /raspi/capture-remote-batch
+  async captureRemoteBatch(req, res) {
+    try {
+      const { count, lockerId } = req.body || {};
+      const user = req.user?.email || null;
+
+      // count mặc định 5 (đúng UI "0/5")
+      const n = Number(count ?? 5);
+      if (!Number.isFinite(n) || n <= 0 || n > 20) {
+        return res.status(400).json({
+          success: false,
+          error: "Invalid count (1..20)",
+        });
+      }
+
+      const r = await raspiService.captureRemoteBatch({
+        count: n,
+        lockerId: lockerId || null,
+        user,
       });
+
+      if (!r.ok) {
+        return res.status(502).json({
+          success: false,
+          error: "Raspi capture batch failed",
+          detail: r.data || r.text || `HTTP ${r.status}`,
+        });
+      }
+
+      return res.json({ success: true, data: r.data || null });
+    } catch (e) {
+      return res.status(500).json({ success: false, error: e.message });
     }
   }
 }
