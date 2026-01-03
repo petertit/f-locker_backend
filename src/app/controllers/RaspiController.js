@@ -1,6 +1,30 @@
 // src/app/controllers/RaspiController.js
 import raspiService from "../../services/raspi_service.js";
 
+function sendRaspiError(res, e, fallbackMsg) {
+  const status = e?.status || 502; // Raspi fail -> 502, timeout -> 504
+  const payload = e?.payload;
+
+  // log để debug Render
+  if (payload) {
+    console.error("[RASPI ERROR]", {
+      status,
+      url: payload.url,
+      raspiStatus: payload.status,
+      data: payload.data,
+      text: payload.text,
+    });
+  } else {
+    console.error("[RASPI ERROR]", e);
+  }
+
+  return res.status(status).json({
+    success: false,
+    error: fallbackMsg || e?.message || "Raspi request failed",
+    detail: payload?.data || payload?.text || null,
+  });
+}
+
 class RaspiController {
   async status(req, res) {
     return res.json({ success: true, ok: true });
@@ -16,19 +40,16 @@ class RaspiController {
       }
 
       const user = req.user?.email || null;
+
+      // ✅ service đã throw nếu lỗi
       const r = await raspiService.lock(lockerId, user);
 
-      if (!r.ok) {
-        return res.status(502).json({
-          success: false,
-          error: "Raspi lock failed",
-          detail: r.data || r.text || `HTTP ${r.status}`,
-        });
-      }
-
-      return res.json({ success: true, ...(r.data || { data: r.data }) });
+      return res.json({
+        success: true,
+        ...(r.data && typeof r.data === "object" ? r.data : { data: r.data }),
+      });
     } catch (e) {
-      return res.status(500).json({ success: false, error: e.message });
+      return sendRaspiError(res, e, "Raspi lock failed");
     }
   }
 
@@ -42,19 +63,15 @@ class RaspiController {
       }
 
       const user = req.user?.email || null;
+
       const r = await raspiService.unlock(lockerId, user);
 
-      if (!r.ok) {
-        return res.status(502).json({
-          success: false,
-          error: "Raspi unlock failed",
-          detail: r.data || r.text || `HTTP ${r.status}`,
-        });
-      }
-
-      return res.json({ success: true, ...(r.data || { data: r.data }) });
+      return res.json({
+        success: true,
+        ...(r.data && typeof r.data === "object" ? r.data : { data: r.data }),
+      });
     } catch (e) {
-      return res.status(500).json({ success: false, error: e.message });
+      return sendRaspiError(res, e, "Raspi unlock failed");
     }
   }
 
@@ -76,14 +93,6 @@ class RaspiController {
         user,
       });
 
-      if (!r.ok) {
-        return res.status(502).json({
-          success: false,
-          error: "Raspi recognize failed",
-          detail: r.data || r.text || `HTTP ${r.status}`,
-        });
-      }
-
       return res.json({
         success: true,
         ...(r.data && typeof r.data === "object"
@@ -91,60 +100,64 @@ class RaspiController {
           : { data: r.data ?? null }),
       });
     } catch (e) {
-      return res.status(500).json({ success: false, error: e.message });
+      return sendRaspiError(res, e, "Raspi recognize failed");
     }
   }
 
-  // ✅ POST /raspi/capture-remote-batch
+  // POST /raspi/capture-remote-batch
   async captureRemoteBatch(req, res) {
     try {
-      const { name, images_data } = req.body || {};
-      if (!name)
+      const { name, images_data, lockerId } = req.body || {};
+
+      if (!name) {
         return res.status(400).json({ success: false, error: "Missing name" });
+      }
 
       if (!Array.isArray(images_data) || images_data.length !== 5) {
         return res.status(400).json({
           success: false,
-          error: `images_data must be an array of 5 images. Got ${Array.isArray(images_data) ? images_data.length : 0}`,
+          error: `images_data must be an array of 5 images. Got ${
+            Array.isArray(images_data) ? images_data.length : 0
+          }`,
         });
       }
 
-      const r = await raspiService.captureRemoteBatch({ name, images_data });
+      const r = await raspiService.captureRemoteBatch({
+        name,
+        images_data,
+        lockerId: lockerId || null, // ✅ forward nếu có
+      });
 
-      if (!r.ok) {
-        return res.status(502).json({
-          success: false,
-          error: "Raspi capture-remote-batch failed",
-          detail: r.data || r.text || `HTTP ${r.status}`,
-        });
-      }
-
-      return res.json({ success: true, ...(r.data || { data: r.data }) });
+      return res.json({
+        success: true,
+        ...(r.data && typeof r.data === "object" ? r.data : { data: r.data }),
+      });
     } catch (e) {
-      return res.status(500).json({ success: false, error: e.message });
+      return sendRaspiError(res, e, "Raspi capture-remote-batch failed");
     }
   }
 
-  // ✅ POST /raspi/capture-batch (Raspi tự chụp)
+  // POST /raspi/capture-batch (Raspi tự chụp)
   async captureBatch(req, res) {
     try {
-      const { name } = req.body || {};
-      if (!name)
+      const { name, count, lockerId } = req.body || {};
+
+      if (!name) {
         return res.status(400).json({ success: false, error: "Missing name" });
-
-      const r = await raspiService.captureBatch({ name });
-
-      if (!r.ok) {
-        return res.status(502).json({
-          success: false,
-          error: "Raspi capture-batch failed",
-          detail: r.data || r.text || `HTTP ${r.status}`,
-        });
       }
 
-      return res.json({ success: true, ...(r.data || { data: r.data }) });
+      const r = await raspiService.captureBatch({
+        name,
+        count: Number(count) || 5, // ✅ default 5
+        lockerId: lockerId || null,
+      });
+
+      return res.json({
+        success: true,
+        ...(r.data && typeof r.data === "object" ? r.data : { data: r.data }),
+      });
     } catch (e) {
-      return res.status(500).json({ success: false, error: e.message });
+      return sendRaspiError(res, e, "Raspi capture-batch failed");
     }
   }
 }
