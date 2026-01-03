@@ -1,9 +1,12 @@
-// Node 18+/22+ có fetch sẵn
+// src/app/services/raspi_service.js
+// Node 22+ có fetch sẵn, KHÔNG cần node-fetch
+
 const RASPI_BASE = process.env.RASPI_BASE_URL || process.env.RASPI_URL || "";
 
 function ensureBase() {
-  if (!RASPI_BASE)
+  if (!RASPI_BASE) {
     throw new Error("Missing RASPI_BASE_URL (or RASPI_URL) in .env");
+  }
 }
 
 function safeJson(text) {
@@ -14,7 +17,15 @@ function safeJson(text) {
   }
 }
 
-async function requestJson(method, path, bodyObj, timeoutMs = 15000) {
+// remove "data:image/...;base64," if present
+function stripDataUrl(dataUrlOrB64) {
+  if (typeof dataUrlOrB64 !== "string") return "";
+  const idx = dataUrlOrB64.indexOf("base64,");
+  if (idx >= 0) return dataUrlOrB64.slice(idx + "base64,".length);
+  return dataUrlOrB64;
+}
+
+async function postJson(path, bodyObj, timeoutMs = 15000) {
   ensureBase();
 
   const ctrl = new AbortController();
@@ -24,51 +35,53 @@ async function requestJson(method, path, bodyObj, timeoutMs = 15000) {
     const url = `${RASPI_BASE}${path.startsWith("/") ? path : `/${path}`}`;
 
     const res = await fetch(url, {
-      method,
+      method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: bodyObj ? JSON.stringify(bodyObj) : undefined,
+      body: JSON.stringify(bodyObj || {}),
       signal: ctrl.signal,
     });
 
     const ct = res.headers.get("content-type") || "";
     const text = await res.text().catch(() => "");
 
-    const data = ct.includes("application/json") ? safeJson(text) : null;
-
-    return {
+    const payload = {
       ok: res.ok,
       status: res.status,
-      data,
+      data: ct.includes("application/json") ? safeJson(text) : null,
       text: text?.slice(0, 800) || "",
     };
+
+    return payload;
   } finally {
     clearTimeout(t);
   }
 }
 
 const raspiService = {
-  status: () => requestJson("GET", "/status", null),
+  lock: (lockerId, user) => postJson("/lock", { lockerId, user }),
+  unlock: (lockerId, user) => postJson("/unlock", { lockerId, user }),
 
-  lock: (lockerId, user) => requestJson("POST", "/lock", { lockerId, user }),
-  unlock: (lockerId, user) =>
-    requestJson("POST", "/unlock", { lockerId, user }),
-
-  // ✅ Raspi expects: { image_data: "<pure base64>" }
-  recognizeRemote: ({ image_data, lockerId, user }) =>
-    requestJson("POST", "/recognize-remote", { image_data, lockerId, user }),
-
-  // ✅ Raspi expects: { name, images_data:[...pure base64...] }
-  captureRemoteBatch: ({ name, images_data, lockerId, user }) =>
-    requestJson("POST", "/capture-remote-batch", {
-      name,
-      images_data,
+  // Raspi nhận diện: chuẩn hóa để Raspi nhận base64 thuần
+  recognizeRemote: ({ imageBase64, lockerId, user }) => {
+    const b64 = stripDataUrl(imageBase64);
+    return postJson("/recognize-remote", {
       lockerId,
       user,
-    }),
+      image_data: b64, // ✅ Raspi server đọc image_data
+      // vẫn gửi thêm để tương thích nếu bạn có code khác:
+      imageBase64,
+    });
+  },
 
-  // optional raspi cam mode
-  captureBatch: ({ name, lockerId, user }) =>
-    requestJson("POST", "/capture-batch", { name, lockerId, user }),
+  // Raspi chụp trực tiếp (nếu USE_CAMERA = True)
+  captureBatch: ({ name }) => postJson("/capture-batch", { name }),
+
+  // Web chụp gửi lên Raspi để train
+  captureRemoteBatch: ({ name, images_data }) => {
+    const imgs = Array.isArray(images_data) ? images_data : [];
+    const normalized = imgs.map(stripDataUrl);
+    return postJson("/capture-remote-batch", { name, images_data: normalized });
+  },
 };
 
 export default raspiService;

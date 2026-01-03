@@ -1,37 +1,19 @@
-import raspiService from "../../services/raspi_service.js";
-
-function stripDataUrlToBase64(s) {
-  if (!s || typeof s !== "string") return "";
-  // if dataURL => remove prefix
-  if (s.includes("base64,")) return s.split("base64,", 2)[1];
-  // if already pure base64
-  return s;
-}
+// src/app/controllers/RaspiController.js
+import raspiService from "../services/raspi_service.js";
 
 class RaspiController {
   async status(req, res) {
-    try {
-      const r = await raspiService.status();
-      if (!r.ok) {
-        return res.status(502).json({
-          success: false,
-          error: "Raspi status failed",
-          detail: r.data || r.text || `HTTP ${r.status}`,
-        });
-      }
-      return res.json({ success: true, ...(r.data || {}) });
-    } catch (e) {
-      return res.status(500).json({ success: false, error: e.message });
-    }
+    return res.json({ success: true, ok: true });
   }
 
   async lock(req, res) {
     try {
       const { lockerId } = req.body || {};
-      if (!lockerId)
+      if (!lockerId) {
         return res
           .status(400)
           .json({ success: false, error: "Missing lockerId" });
+      }
 
       const user = req.user?.email || null;
       const r = await raspiService.lock(lockerId, user);
@@ -43,7 +25,8 @@ class RaspiController {
           detail: r.data || r.text || `HTTP ${r.status}`,
         });
       }
-      return res.json({ success: true, ...(r.data || {}) });
+
+      return res.json({ success: true, ...(r.data || { data: r.data }) });
     } catch (e) {
       return res.status(500).json({ success: false, error: e.message });
     }
@@ -52,10 +35,11 @@ class RaspiController {
   async unlock(req, res) {
     try {
       const { lockerId } = req.body || {};
-      if (!lockerId)
+      if (!lockerId) {
         return res
           .status(400)
           .json({ success: false, error: "Missing lockerId" });
+      }
 
       const user = req.user?.email || null;
       const r = await raspiService.unlock(lockerId, user);
@@ -67,31 +51,27 @@ class RaspiController {
           detail: r.data || r.text || `HTTP ${r.status}`,
         });
       }
-      return res.json({ success: true, ...(r.data || {}) });
+
+      return res.json({ success: true, ...(r.data || { data: r.data }) });
     } catch (e) {
       return res.status(500).json({ success: false, error: e.message });
     }
   }
 
-  // ✅ POST /raspi/recognize-remote
+  // POST /raspi/recognize-remote
   async recognizeRemote(req, res) {
     try {
       const { imageBase64, lockerId } = req.body || {};
-      if (!imageBase64)
+      if (!imageBase64) {
         return res
           .status(400)
           .json({ success: false, error: "Missing imageBase64" });
-
-      const image_data = stripDataUrlToBase64(imageBase64);
-      if (!image_data)
-        return res
-          .status(400)
-          .json({ success: false, error: "Invalid imageBase64" });
+      }
 
       const user = req.user?.email || null;
 
       const r = await raspiService.recognizeRemote({
-        image_data,
+        imageBase64,
         lockerId: lockerId || null,
         user,
       });
@@ -104,8 +84,12 @@ class RaspiController {
         });
       }
 
-      // Raspi returns: {success: bool, name: "..."}
-      return res.json({ success: true, ...(r.data || {}) });
+      return res.json({
+        success: true,
+        ...(r.data && typeof r.data === "object"
+          ? r.data
+          : { data: r.data ?? null }),
+      });
     } catch (e) {
       return res.status(500).json({ success: false, error: e.message });
     }
@@ -114,63 +98,51 @@ class RaspiController {
   // ✅ POST /raspi/capture-remote-batch
   async captureRemoteBatch(req, res) {
     try {
-      const { name, images_data, lockerId } = req.body || {};
+      const { name, images_data } = req.body || {};
       if (!name)
         return res.status(400).json({ success: false, error: "Missing name" });
+
       if (!Array.isArray(images_data) || images_data.length !== 5) {
         return res.status(400).json({
           success: false,
-          error: "images_data must be an array of 5 base64 images",
+          error: `images_data must be an array of 5 images. Got ${Array.isArray(images_data) ? images_data.length : 0}`,
         });
       }
 
-      const user = req.user?.email || null;
-
-      const r = await raspiService.captureRemoteBatch({
-        name,
-        images_data,
-        lockerId: lockerId || null,
-        user,
-      });
+      const r = await raspiService.captureRemoteBatch({ name, images_data });
 
       if (!r.ok) {
         return res.status(502).json({
           success: false,
-          error: "Raspi capture/train failed",
+          error: "Raspi capture-remote-batch failed",
           detail: r.data || r.text || `HTTP ${r.status}`,
         });
       }
 
-      return res.json({ success: true, ...(r.data || {}) });
+      return res.json({ success: true, ...(r.data || { data: r.data }) });
     } catch (e) {
       return res.status(500).json({ success: false, error: e.message });
     }
   }
 
-  // optional raspi cam mode
+  // ✅ POST /raspi/capture-batch (Raspi tự chụp)
   async captureBatch(req, res) {
     try {
-      const { name, lockerId } = req.body || {};
+      const { name } = req.body || {};
       if (!name)
         return res.status(400).json({ success: false, error: "Missing name" });
 
-      const user = req.user?.email || null;
-
-      const r = await raspiService.captureBatch({
-        name,
-        lockerId: lockerId || null,
-        user,
-      });
+      const r = await raspiService.captureBatch({ name });
 
       if (!r.ok) {
         return res.status(502).json({
           success: false,
-          error: "Raspi capture/train failed",
+          error: "Raspi capture-batch failed",
           detail: r.data || r.text || `HTTP ${r.status}`,
         });
       }
 
-      return res.json({ success: true, ...(r.data || {}) });
+      return res.json({ success: true, ...(r.data || { data: r.data }) });
     } catch (e) {
       return res.status(500).json({ success: false, error: e.message });
     }
