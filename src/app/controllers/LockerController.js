@@ -1,7 +1,7 @@
 // LockerController.js
 import mongoose from "mongoose";
-import Locker from "./models/Locker.js";
-import History from "./models/History.js";
+import Locker from "../models/Locker.js";
+import History from "../models/History.js";
 
 class LockerController {
   async update(req, res) {
