@@ -3,123 +3,226 @@ import mongoose from "mongoose";
 import Locker from "../models/Locker.js";
 import History from "../models/History.js";
 
-function normalizeStatus(s) {
-  const v = String(s || "")
-    .toUpperCase()
-    .trim();
+/**
+ * Status chuẩn để Frontend hiểu UI
+ * - EMPTY: chưa ai đăng ký
+ * - LOCKED: đã đăng ký & đang đóng
+ * - OPENED: đã mở
+ */
+const VALID_STATUS = new Set(["EMPTY", "LOCKED", "OPENED"]);
 
-  // bạn có thể mở rộng thêm tuỳ frontend gửi gì
-  if (["OPEN", "OPENED", "UNLOCK", "UNLOCKED"].includes(v)) return "OPENED";
-  if (["LOCK", "LOCKED", "CLOSE", "CLOSED"].includes(v)) return "LOCKED";
+function normalizeLockerId(v) {
+  const s = String(v || "").trim();
+  // chấp nhận "1" -> "01"
+  if (/^\d$/.test(s)) return `0${s}`;
+  return s;
+}
 
-  // giữ nguyên nếu là trạng thái khác (EMPTY/USING/...)
-  return v || "UNKNOWN";
+function normalizeStatus(v) {
+  const s = String(v || "")
+    .trim()
+    .toUpperCase();
+  if (s === "OPEN" || s === "UNLOCK" || s === "UNLOCKED") return "OPENED";
+  if (s === "CLOSE" || s === "LOCK") return "LOCKED";
+  if (VALID_STATUS.has(s)) return s;
+  return null;
+}
+
+async function ensureSeedLockers() {
+  // bạn đang có 6 tủ
+  const ids = ["01", "02", "03", "04", "05", "06"];
+
+  await Promise.all(
+    ids.map((id) =>
+      Locker.updateOne(
+        { lockerId: id },
+        {
+          $setOnInsert: {
+            lockerId: id,
+            status: "EMPTY",
+            ownerId: null,
+            passcode: null,
+          },
+        },
+        { upsert: true }
+      )
+    )
+  );
+}
+
+async function writeHistory({ lockerId, reqUser, action, meta }) {
+  try {
+    if (!lockerId) return;
+    const userId =
+      reqUser?._id && mongoose.isValidObjectId(reqUser._id)
+        ? reqUser._id
+        : null;
+
+    await History.create({
+      lockerId,
+      userId,
+      userEmail: reqUser?.email || null,
+      action, // "REGISTERED" | "OPENED" | "LOCKED" | "UNREGISTERED"
+      meta: meta || {},
+    });
+  } catch (e) {
+    // không làm fail request chỉ vì history
+    console.warn("History write failed:", e?.message);
+  }
 }
 
 class LockerController {
   // GET /lockers/status
   async status(req, res) {
     try {
-      // đảm bảo luôn có 01..06
-      const all = await Locker.find().lean();
-      for (let i = 1; i <= 6; i++) {
-        const id = i.toString().padStart(2, "0");
-        const exists = all.find((l) => l.lockerId === id);
-        if (!exists) {
-          await Locker.updateOne(
-            { lockerId: id },
-            { $setOnInsert: { lockerId: id, status: "EMPTY", ownerId: null } },
-            { upsert: true }
-          );
-        }
-      }
+      await ensureSeedLockers();
 
-      const finalLockers = await Locker.find().lean();
-      return res.json({
-        success: true,
-        lockers: finalLockers.map((l) => ({
-          lockerId: l.lockerId,
-          status: l.status,
-          ownerId: l.ownerId ? l.ownerId.toString() : null,
-        })),
-      });
-    } catch (err) {
-      return res.status(500).json({
-        success: false,
-        error: "Lỗi khi tải trạng thái tủ: " + err.message,
-      });
+      const lockers = await Locker.find({}, { __v: 0 })
+        .sort({ lockerId: 1 })
+        .lean();
+
+      return res.json({ success: true, lockers });
+    } catch (e) {
+      console.error("Locker status error:", e);
+      return res.status(500).json({ success: false, error: e.message });
     }
   }
 
-  // POST /lockers/update
+  /**
+   * POST /lockers/update
+   * Body hỗ trợ:
+   * - lockerId (required)
+   * - action: "register" | "unregister" | "setStatus"
+   * - status: "OPENED" | "LOCKED" | "EMPTY"
+   * - passcode: optional (khi register)
+   */
   async update(req, res) {
     try {
-      const { lockerId } = req.body || {};
+      const rawLockerId = req.body?.lockerId;
+      const lockerId = normalizeLockerId(rawLockerId);
+
       if (!lockerId) {
         return res
           .status(400)
           .json({ success: false, error: "Missing lockerId" });
       }
 
-      const status = normalizeStatus(req.body?.status);
+      const action = String(req.body?.action || "setStatus").toLowerCase();
 
-      // user thao tác (để log lịch sử)
-      const actorId = req.user?._id || req.user?.id || req.user?.userId || null;
+      // đảm bảo locker tồn tại
+      await ensureSeedLockers();
 
-      // lấy locker hiện tại để:
-      // 1) giữ ownerId nếu request không gửi
-      // 2) log đúng theo chủ tủ nếu cần
-      const current = await Locker.findOne({ lockerId }).lean();
-      if (!current) {
+      const locker = await Locker.findOne({ lockerId });
+      if (!locker) {
         return res
           .status(404)
-          .json({ success: false, error: "Không tìm thấy tủ: " + lockerId });
+          .json({ success: false, error: "Locker not found" });
       }
 
-      // ownerId: chỉ update nếu client gửi ownerId (tránh bị null khi mở tủ)
-      let nextOwnerId = current.ownerId || null;
-      if (req.body?.ownerId) {
-        nextOwnerId = new mongoose.Types.ObjectId(req.body.ownerId);
-      }
+      // ===== action: register =====
+      if (action === "register") {
+        // yêu cầu login
+        if (!req.user?._id) {
+          return res
+            .status(401)
+            .json({ success: false, error: "Unauthorized" });
+        }
 
-      // ✅ LOG HISTORY: cả OPENED và LOCKED
-      // - ưu tiên log theo actor (người đang mở/đóng)
-      // - fallback về ownerId hiện tại của tủ
-      const historyUserId = actorId || current.ownerId || nextOwnerId || null;
+        // nếu locker đang thuộc người khác -> chặn
+        if (locker.ownerId && String(locker.ownerId) !== String(req.user._id)) {
+          return res.status(403).json({
+            success: false,
+            error: "Locker is already registered by another user",
+          });
+        }
 
-      if (historyUserId && (status === "LOCKED" || status === "OPENED")) {
-        await new History({
-          userId: historyUserId,
+        locker.ownerId = req.user._id;
+        locker.status = "LOCKED";
+
+        // passcode có thể lưu ở locker hoặc user, tùy bạn.
+        if (req.body?.passcode != null) {
+          locker.passcode = String(req.body.passcode);
+        }
+
+        await locker.save();
+
+        await writeHistory({
           lockerId,
-          action: status, // "LOCKED" hoặc "OPENED"
-          timestamp: new Date(),
-        }).save();
+          reqUser: req.user,
+          action: "REGISTERED",
+          meta: { passcodeSet: req.body?.passcode != null },
+        });
+
+        return res.json({ success: true, locker });
       }
 
-      const updated = await Locker.findOneAndUpdate(
-        { lockerId },
-        { status, ownerId: nextOwnerId, timestamp: new Date() },
-        { new: true }
-      ).lean();
+      // ===== action: unregister =====
+      if (action === "unregister") {
+        if (!req.user?._id) {
+          return res
+            .status(401)
+            .json({ success: false, error: "Unauthorized" });
+        }
 
-      return res.json({
-        success: true,
-        locker: {
-          lockerId: updated.lockerId,
-          status: updated.status,
-          ownerId: updated.ownerId ? updated.ownerId.toString() : null,
-        },
-      });
-    } catch (err) {
-      if (err instanceof mongoose.Error.CastError) {
-        return res
-          .status(400)
-          .json({ success: false, error: "Invalid owner ID format" });
+        // chỉ chủ mới được hủy
+        if (locker.ownerId && String(locker.ownerId) !== String(req.user._id)) {
+          return res.status(403).json({
+            success: false,
+            error: "You are not the owner of this locker",
+          });
+        }
+
+        locker.ownerId = null;
+        locker.passcode = null;
+        locker.status = "EMPTY";
+        await locker.save();
+
+        await writeHistory({
+          lockerId,
+          reqUser: req.user,
+          action: "UNREGISTERED",
+          meta: {},
+        });
+
+        return res.json({ success: true, locker });
       }
-      return res.status(500).json({
-        success: false,
-        error: "Lỗi khi cập nhật trạng thái tủ: " + err.message,
-      });
+
+      // ===== action: setStatus (mở/đóng) =====
+      const nextStatus = normalizeStatus(req.body?.status);
+      if (!nextStatus) {
+        return res.status(400).json({
+          success: false,
+          error: `Invalid status. Allowed: ${Array.from(VALID_STATUS).join(
+            ", "
+          )}`,
+        });
+      }
+
+      const prevStatus = locker.status || "EMPTY";
+      locker.status = nextStatus;
+      await locker.save();
+
+      // log lịch sử mở/đóng
+      if (nextStatus === "OPENED") {
+        await writeHistory({
+          lockerId,
+          reqUser: req.user,
+          action: "OPENED",
+          meta: { prevStatus },
+        });
+      } else if (nextStatus === "LOCKED") {
+        await writeHistory({
+          lockerId,
+          reqUser: req.user,
+          action: "LOCKED",
+          meta: { prevStatus },
+        });
+      }
+
+      return res.json({ success: true, locker });
+    } catch (e) {
+      console.error("Locker update error:", e);
+      return res.status(500).json({ success: false, error: e.message });
     }
   }
 }
