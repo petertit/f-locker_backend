@@ -1,227 +1,159 @@
 // src/app/controllers/LockerController.js
-import mongoose from "mongoose";
-import Locker from "../models/Locker.js";
-import History from "../models/History.js";
+import LockerState from "../models/LockerState.js"; // giữ đúng path model của bạn
+import History from "../models/History.js"; // giữ đúng path model của bạn
 
-/**
- * Status chuẩn để Frontend hiểu UI
- * - EMPTY: chưa ai đăng ký
- * - LOCKED: đã đăng ký & đang đóng
- * - OPENED: đã mở
- */
-const VALID_STATUS = new Set(["EMPTY", "LOCKED", "OPENED"]);
-
-function normalizeLockerId(v) {
-  const s = String(v || "").trim();
-  // chấp nhận "1" -> "01"
-  if (/^\d$/.test(s)) return `0${s}`;
-  return s;
-}
-
-function normalizeStatus(v) {
-  const s = String(v || "")
+function upper(s) {
+  return String(s || "")
     .trim()
     .toUpperCase();
-  if (s === "OPEN" || s === "UNLOCK" || s === "UNLOCKED") return "OPENED";
-  if (s === "CLOSE" || s === "LOCK") return "LOCKED";
-  if (VALID_STATUS.has(s)) return s;
-  return null;
 }
 
-async function ensureSeedLockers() {
-  // bạn đang có 6 tủ
-  const ids = ["01", "02", "03", "04", "05", "06"];
+// map các status frontend -> status hợp lệ theo enum của LockerState
+function normalizeLockerStatus(input, allowedEnums = []) {
+  const s = upper(input);
 
-  await Promise.all(
-    ids.map((id) =>
-      Locker.updateOne(
-        { lockerId: id },
-        {
-          $setOnInsert: {
-            lockerId: id,
-            status: "EMPTY",
-            ownerId: null,
-            passcode: null,
-          },
-        },
-        { upsert: true }
-      )
-    )
-  );
+  // các alias phổ biến từ frontend
+  const aliasToCanonical = {
+    OPENED: "OPEN", // nhiều schema dùng OPEN thay vì OPENED
+    UNLOCKED: "OPEN",
+    UNLOCK: "OPEN",
+    OPEN: "OPEN",
+
+    CLOSED: "LOCKED",
+    CLOSE: "LOCKED",
+    LOCK: "LOCKED",
+    LOCKED: "LOCKED",
+  };
+
+  let candidate = aliasToCanonical[s] || s;
+
+  // nếu schema có đúng candidate thì dùng luôn
+  if (allowedEnums.includes(candidate)) return candidate;
+
+  // fallback thông minh theo schema enum thực tế
+  // nếu schema dùng "OPENED" (hiếm) thì convert ngược
+  if (candidate === "OPEN" && allowedEnums.includes("OPENED")) return "OPENED";
+  if (candidate === "LOCKED" && allowedEnums.includes("CLOSED"))
+    return "CLOSED";
+
+  // nếu schema dùng UNLOCKED thay OPEN
+  if (candidate === "OPEN" && allowedEnums.includes("UNLOCKED"))
+    return "UNLOCKED";
+
+  // không khớp thì trả nguyên candidate để validate lỗi rõ ràng
+  return candidate;
 }
 
-async function writeHistory({ lockerId, reqUser, action, meta }) {
-  try {
-    if (!lockerId) return;
-    const userId =
-      reqUser?._id && mongoose.isValidObjectId(reqUser._id)
-        ? reqUser._id
-        : null;
+// map status -> action history (History.js của bạn đang có OPENED / LOCKED)
+function normalizeHistoryActionFromStatus(status, allowedActions = []) {
+  const s = upper(status);
 
-    await History.create({
-      lockerId,
-      userId,
-      userEmail: reqUser?.email || null,
-      action, // "REGISTERED" | "OPENED" | "LOCKED" | "UNREGISTERED"
-      meta: meta || {},
-    });
-  } catch (e) {
-    // không làm fail request chỉ vì history
-    console.warn("History write failed:", e?.message);
-  }
+  // ưu tiên OPENED/LOCKED theo UI của bạn
+  let action =
+    s === "OPEN" || s === "UNLOCKED" || s === "OPENED" ? "OPENED" : "LOCKED";
+
+  if (allowedActions.includes(action)) return action;
+
+  // fallback nếu enum history khác
+  if (action === "OPENED" && allowedActions.includes("OPEN")) return "OPEN";
+  if (action === "LOCKED" && allowedActions.includes("CLOSED")) return "CLOSED";
+
+  return action;
 }
 
 class LockerController {
-  // GET /lockers/status
+  // GET /lockers/status?lockerId=06
   async status(req, res) {
     try {
-      await ensureSeedLockers();
+      const lockerId = String(req.query?.lockerId || "").trim();
+      if (!lockerId) {
+        return res
+          .status(400)
+          .json({ success: false, error: "Missing lockerId (query)" });
+      }
 
-      const lockers = await Locker.find({}, { __v: 0 })
-        .sort({ lockerId: 1 })
-        .lean();
-
-      return res.json({ success: true, lockers });
+      const doc = await LockerState.findOne({ lockerId }).lean();
+      // nếu chưa có record thì coi như LOCKED (đóng)
+      return res.json({
+        success: true,
+        lockerId,
+        status: doc?.status || "LOCKED",
+        updatedAt: doc?.updatedAt || null,
+      });
     } catch (e) {
-      console.error("Locker status error:", e);
       return res.status(500).json({ success: false, error: e.message });
     }
   }
 
-  /**
-   * POST /lockers/update
-   * Body hỗ trợ:
-   * - lockerId (required)
-   * - action: "register" | "unregister" | "setStatus"
-   * - status: "OPENED" | "LOCKED" | "EMPTY"
-   * - passcode: optional (khi register)
-   */
+  // POST /lockers/update  { lockerId: "06", status: "OPENED" }
   async update(req, res) {
     try {
-      const rawLockerId = req.body?.lockerId;
-      const lockerId = normalizeLockerId(rawLockerId);
+      const lockerId = String(req.body?.lockerId || "").trim();
+      const rawStatus = req.body?.status;
 
       if (!lockerId) {
         return res
           .status(400)
           .json({ success: false, error: "Missing lockerId" });
       }
-
-      const action = String(req.body?.action || "setStatus").toLowerCase();
-
-      // đảm bảo locker tồn tại
-      await ensureSeedLockers();
-
-      const locker = await Locker.findOne({ lockerId });
-      if (!locker) {
+      if (!rawStatus) {
         return res
-          .status(404)
-          .json({ success: false, error: "Locker not found" });
+          .status(400)
+          .json({ success: false, error: "Missing status" });
       }
 
-      // ===== action: register =====
-      if (action === "register") {
-        // yêu cầu login
-        if (!req.user?._id) {
-          return res
-            .status(401)
-            .json({ success: false, error: "Unauthorized" });
-        }
+      // lấy enum thật từ schema LockerState
+      const allowedStatuses =
+        LockerState?.schema?.path("status")?.enumValues || [];
 
-        // nếu locker đang thuộc người khác -> chặn
-        if (locker.ownerId && String(locker.ownerId) !== String(req.user._id)) {
-          return res.status(403).json({
-            success: false,
-            error: "Locker is already registered by another user",
-          });
-        }
+      const status = normalizeLockerStatus(rawStatus, allowedStatuses);
 
-        locker.ownerId = req.user._id;
-        locker.status = "LOCKED";
-
-        // passcode có thể lưu ở locker hoặc user, tùy bạn.
-        if (req.body?.passcode != null) {
-          locker.passcode = String(req.body.passcode);
-        }
-
-        await locker.save();
-
-        await writeHistory({
-          lockerId,
-          reqUser: req.user,
-          action: "REGISTERED",
-          meta: { passcodeSet: req.body?.passcode != null },
-        });
-
-        return res.json({ success: true, locker });
-      }
-
-      // ===== action: unregister =====
-      if (action === "unregister") {
-        if (!req.user?._id) {
-          return res
-            .status(401)
-            .json({ success: false, error: "Unauthorized" });
-        }
-
-        // chỉ chủ mới được hủy
-        if (locker.ownerId && String(locker.ownerId) !== String(req.user._id)) {
-          return res.status(403).json({
-            success: false,
-            error: "You are not the owner of this locker",
-          });
-        }
-
-        locker.ownerId = null;
-        locker.passcode = null;
-        locker.status = "EMPTY";
-        await locker.save();
-
-        await writeHistory({
-          lockerId,
-          reqUser: req.user,
-          action: "UNREGISTERED",
-          meta: {},
-        });
-
-        return res.json({ success: true, locker });
-      }
-
-      // ===== action: setStatus (mở/đóng) =====
-      const nextStatus = normalizeStatus(req.body?.status);
-      if (!nextStatus) {
+      // nếu schema có enum mà status không hợp lệ -> báo rõ allowed
+      if (allowedStatuses.length && !allowedStatuses.includes(status)) {
         return res.status(400).json({
           success: false,
-          error: `Invalid status. Allowed: ${Array.from(VALID_STATUS).join(
-            ", "
-          )}`,
+          error: `Invalid status: ${status}`,
+          allowed: allowedStatuses,
+          hint: "Frontend is sending OPENED. Your schema enum may be OPEN/UNLOCKED instead.",
         });
       }
 
-      const prevStatus = locker.status || "EMPTY";
-      locker.status = nextStatus;
-      await locker.save();
+      // lấy trạng thái cũ để tránh ghi history trùng
+      const prev = await LockerState.findOne({ lockerId }).lean();
+      const prevStatus = prev?.status || null;
 
-      // log lịch sử mở/đóng
-      if (nextStatus === "OPENED") {
-        await writeHistory({
-          lockerId,
-          reqUser: req.user,
-          action: "OPENED",
-          meta: { prevStatus },
-        });
-      } else if (nextStatus === "LOCKED") {
-        await writeHistory({
-          lockerId,
-          reqUser: req.user,
-          action: "LOCKED",
-          meta: { prevStatus },
-        });
+      const updated = await LockerState.findOneAndUpdate(
+        { lockerId },
+        { $set: { status } },
+        { new: true, upsert: true }
+      ).lean();
+
+      // ====== GHI LỊCH SỬ (OPEN + LOCK) ======
+      // chỉ ghi nếu status thực sự thay đổi
+      if (!prevStatus || prevStatus !== status) {
+        const allowedActions =
+          History?.schema?.path("action")?.enumValues || [];
+        const action = normalizeHistoryActionFromStatus(status, allowedActions);
+
+        // nếu History có enum mà action không hợp lệ -> bỏ qua lịch sử nhưng không làm fail update
+        if (!allowedActions.length || allowedActions.includes(action)) {
+          await History.create({
+            userId: req.user?._id || req.user?.id, // tùy middleware authUser của bạn set gì
+            lockerId,
+            action, // OPENED / LOCKED
+            timestamp: new Date(),
+          });
+        }
       }
 
-      return res.json({ success: true, locker });
+      return res.json({
+        success: true,
+        lockerId,
+        prevStatus,
+        status: updated?.status,
+        updatedAt: updated?.updatedAt || null,
+      });
     } catch (e) {
-      console.error("Locker update error:", e);
       return res.status(500).json({ success: false, error: e.message });
     }
   }
