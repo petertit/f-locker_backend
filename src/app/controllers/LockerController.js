@@ -4,6 +4,29 @@ import Locker from "../models/Locker.js";
 import History from "../models/History.js";
 
 class LockerController {
+  async status(req, res) {
+    try {
+      const userId = req.user._id;
+
+      // Lấy các locker của user
+      const lockers = await Locker.find({ ownerId: userId }).lean();
+
+      return res.json({
+        success: true,
+        lockers: lockers.map((l) => ({
+          lockerId: l.lockerId,
+          status: l.status,
+          timestamp: l.timestamp,
+        })),
+      });
+    } catch (err) {
+      return res.status(500).json({
+        success: false,
+        error: "Không lấy được trạng thái tủ",
+        detail: err.message,
+      });
+    }
+  }
   async update(req, res) {
     try {
       const { lockerId, status } = req.body;
