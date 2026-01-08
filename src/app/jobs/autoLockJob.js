@@ -1,7 +1,7 @@
 // src/app/jobs/autoLockJob.js
 import Locker from "../models/Locker.js";
 import History from "../models/History.js";
-import raspiService from "../services/raspi_service.js";
+import raspiService from "../../services/raspi_service.js";
 
 export function startAutoLockJob({
   timeoutMs = 60_000,
