@@ -1,4 +1,4 @@
-// server/src/app/models/Locker.js
+// src/app/models/Locker.js
 import mongoose from "mongoose";
 
 const lockerStateSchema = new mongoose.Schema(
@@ -14,6 +14,10 @@ const lockerStateSchema = new mongoose.Schema(
       ref: "Account",
       default: null,
     },
+
+    // ✅ NEW: mốc hoạt động cuối để backend auto-lock theo timeout
+    lastActiveAt: { type: Date, default: Date.now },
+
     timestamp: { type: Date, default: Date.now },
   },
   { collection: "locker_states" }

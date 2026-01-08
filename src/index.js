@@ -7,6 +7,9 @@ import dotenv from "dotenv";
 import route from "./routes/index.js";
 import connectDB from "./config/db/index.js";
 
+// ✅ NEW
+import { startAutoLockJob } from "./app/jobs/autoLockJob.js";
+
 dotenv.config();
 
 const app = express();
@@ -67,6 +70,13 @@ const PORT = process.env.PORT || 4000;
 (async () => {
   try {
     await connectDB();
+
+    // ✅ NEW: auto-lock timeout job
+    startAutoLockJob({
+      timeoutMs: Number(process.env.AUTO_LOCK_TIMEOUT_MS) || 60_000,
+      intervalMs: Number(process.env.AUTO_LOCK_INTERVAL_MS) || 10_000,
+    });
+
     app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
   } catch (err) {
     console.error("❌ Cannot start server:", err.message);

@@ -8,7 +8,6 @@ function normalizeLockerStatus(raw) {
     .trim()
     .toUpperCase();
 
-  // Frontend hay gửi OPENED -> nhưng Locker schema chỉ nhận OPEN
   if (s === "OPENED") return "OPEN";
   if (s === "OPEN") return "OPEN";
 
@@ -17,7 +16,7 @@ function normalizeLockerStatus(raw) {
 
   if (s === "EMPTY" || s === "AVAILABLE" || s === "FREE") return "EMPTY";
 
-  return s; // để mongoose tự validate nếu giá trị lạ
+  return s;
 }
 
 class LockerController {
@@ -32,7 +31,15 @@ class LockerController {
         if (!exists) {
           await Locker.updateOne(
             { lockerId: id },
-            { $setOnInsert: { lockerId: id, status: "EMPTY", ownerId: null } },
+            {
+              $setOnInsert: {
+                lockerId: id,
+                status: "EMPTY",
+                ownerId: null,
+                lastActiveAt: new Date(), // ✅ NEW
+                timestamp: new Date(),
+              },
+            },
             { upsert: true }
           );
         }
@@ -55,7 +62,7 @@ class LockerController {
     }
   }
 
-  // POST /lockers/update
+  // POST /lockers/update  (protected)
   async update(req, res) {
     try {
       const { lockerId } = req.body || {};
@@ -68,7 +75,6 @@ class LockerController {
       const incomingStatus = req.body?.status;
       const status = normalizeLockerStatus(incomingStatus);
 
-      // ownerId: nếu FE gửi thì dùng; nếu không gửi thì giữ nguyên (trừ khi EMPTY -> null)
       const ownerIdFromBody = req.body?.ownerId
         ? new mongoose.Types.ObjectId(req.body.ownerId)
         : null;
@@ -81,15 +87,10 @@ class LockerController {
       }
 
       let nextOwnerId = current.ownerId || null;
-
-      // nếu FE có gửi ownerId thì ưu tiên theo FE (đăng ký tủ / gán chủ)
       if (ownerIdFromBody) nextOwnerId = ownerIdFromBody;
-
-      // nếu EMPTY thì xóa owner
       if (status === "EMPTY") nextOwnerId = null;
 
-      // ===== GHI HISTORY ĐỦ CẢ OPEN + LOCK =====
-      // History schema action của bạn: OPENED | LOCKED
+      // ===== HISTORY OPEN + LOCK =====
       if (current.ownerId) {
         if (status === "OPEN") {
           await new History({
@@ -106,13 +107,13 @@ class LockerController {
         }
       }
 
-      // cập nhật locker
       const updated = await Locker.findOneAndUpdate(
         { lockerId },
         {
           status,
           ownerId: nextOwnerId,
           timestamp: new Date(),
+          lastActiveAt: new Date(), // ✅ NEW (mọi update đều “touch”)
         },
         { new: true, runValidators: true }
       ).lean();
@@ -135,6 +136,46 @@ class LockerController {
         success: false,
         error: "Lỗi khi cập nhật trạng thái tủ: " + err.message,
       });
+    }
+  }
+
+  // POST /lockers/touch  (protected)
+  async touch(req, res) {
+    try {
+      const { lockerId } = req.body || {};
+      if (!lockerId) {
+        return res
+          .status(400)
+          .json({ success: false, error: "Missing lockerId" });
+      }
+
+      const current = await Locker.findOne({ lockerId }).lean();
+      if (!current) {
+        return res
+          .status(404)
+          .json({ success: false, error: "Không tìm thấy tủ: " + lockerId });
+      }
+
+      // ✅ Chỉ cho OWNER touch (tránh người khác giữ sống session)
+      const userId = req.user?.id; // từ auth_user.js :contentReference[oaicite:2]{index=2}
+      const isOwner =
+        current.ownerId && userId && String(current.ownerId) === String(userId);
+
+      const isAdmin =
+        (req.user?.email || "").toLowerCase() === "admin@gmail.com";
+
+      if (!isOwner && !isAdmin) {
+        return res.status(403).json({ success: false, error: "Not owner" });
+      }
+
+      await Locker.updateOne(
+        { lockerId },
+        { $set: { lastActiveAt: new Date() } }
+      );
+
+      return res.json({ success: true });
+    } catch (err) {
+      return res.status(500).json({ success: false, error: err.message });
     }
   }
 }

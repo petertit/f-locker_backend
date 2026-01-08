@@ -5,12 +5,15 @@ import authUser from "../app/middlewares/auth_user.js";
 
 const router = express.Router();
 
-// public (frontend cần load trạng thái)
+// public
 router.get("/status", (req, res) => LockerController.status(req, res));
 
-// protected (cần login để update/register/unregister)
+// protected
 router.post("/update", authUser, (req, res) =>
   LockerController.update(req, res)
 );
+
+// ✅ NEW: heartbeat
+router.post("/touch", authUser, (req, res) => LockerController.touch(req, res));
 
 export default router;
