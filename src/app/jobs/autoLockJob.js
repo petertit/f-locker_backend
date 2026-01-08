@@ -1,56 +1,97 @@
 // src/app/jobs/autoLockJob.js
 import Locker from "../models/Locker.js";
 import History from "../models/History.js";
-import raspiService from "../../services/raspi_service.js";
+import raspiService from "../services/raspi_service.js";
 
+/**
+ * Auto-lock lockers when inactive for a timeout.
+ *
+ * Logic:
+ * - Only consider lockers that are OPEN and have ownerId
+ * - Determine lastActive = lastActiveAt || timestamp || Date.now()
+ * - If now - lastActive > timeoutMs => lock
+ *
+ * Why fallback?
+ * - Existing Mongo documents may not have lastActiveAt.
+ */
 export function startAutoLockJob({
-  timeoutMs = 60_000,
-  intervalMs = 10_000,
+  timeoutMs = 60_000, // 60s
+  intervalMs = 10_000, // 10s
 } = {}) {
   console.log(
     `🕒 Auto-lock job started | timeout=${timeoutMs}ms | interval=${intervalMs}ms`
   );
 
+  let running = false;
+
   setInterval(async () => {
-    const now = Date.now();
-    const deadline = new Date(now - timeoutMs);
+    if (running) return;
+    running = true;
 
-    // chỉ auto-lock những tủ đang OPEN + có owner + lastActiveAt quá hạn
-    const expired = await Locker.find({
-      status: "OPEN",
-      ownerId: { $ne: null },
-      lastActiveAt: { $lte: deadline },
-    }).lean();
+    try {
+      const now = Date.now();
 
-    for (const l of expired) {
-      try {
-        // 1) gọi Raspi lock
-        await raspiService.lock(l.lockerId, "AUTOLOCK"); // service hiện có :contentReference[oaicite:5]{index=5}
+      // ✅ Only lockers that are OPEN and have ownerId
+      // (If you want ultra-safe: change OPEN -> {$in:["OPEN","LOCKED"]})
+      const candidates = await Locker.find({
+        status: "OPEN",
+        ownerId: { $ne: null },
+      }).lean();
 
-        // 2) update DB về LOCKED + refresh time
-        await Locker.updateOne(
-          { lockerId: l.lockerId },
-          {
-            $set: {
-              status: "LOCKED",
-              timestamp: new Date(),
-              lastActiveAt: new Date(),
-            },
-          }
-        );
+      if (!candidates.length) return;
 
-        // 3) ghi history
-        await new History({
-          userId: l.ownerId,
-          lockerId: l.lockerId,
-          action: "LOCKED",
-        }).save();
+      const expired = candidates.filter((l) => {
+        const last =
+          (l.lastActiveAt ? new Date(l.lastActiveAt).getTime() : null) ??
+          (l.timestamp ? new Date(l.timestamp).getTime() : null) ??
+          now;
 
-        console.log(`🔒 AUTOLOCK OK locker=${l.lockerId}`);
-      } catch (e) {
-        // Raspi fail => lần sau thử lại
-        console.warn(`⚠️ AUTOLOCK FAIL locker=${l.lockerId}:`, e?.message || e);
+        return now - last > timeoutMs;
+      });
+
+      if (!expired.length) return;
+
+      console.log(
+        `🔎 AUTOLOCK scan: candidates=${candidates.length} expired=${expired.length}`
+      );
+
+      for (const l of expired) {
+        try {
+          // 1) Raspi lock
+          await raspiService.lock(l.lockerId, "AUTOLOCK");
+
+          // 2) Update DB -> LOCKED + refresh times
+          await Locker.updateOne(
+            { lockerId: l.lockerId },
+            {
+              $set: {
+                status: "LOCKED",
+                timestamp: new Date(),
+                lastActiveAt: new Date(),
+              },
+            }
+          );
+
+          // 3) History
+          await new History({
+            userId: l.ownerId,
+            lockerId: l.lockerId,
+            action: "LOCKED",
+          }).save();
+
+          console.log(`🔒 AUTOLOCK OK locker=${l.lockerId}`);
+        } catch (e) {
+          // If Raspi fails, keep OPEN so job retries next round
+          console.warn(
+            `⚠️ AUTOLOCK FAIL locker=${l.lockerId}:`,
+            e?.message || e
+          );
+        }
       }
+    } catch (e) {
+      console.error("❌ AUTOLOCK JOB ERROR:", e?.message || e);
+    } finally {
+      running = false;
     }
   }, intervalMs);
 }

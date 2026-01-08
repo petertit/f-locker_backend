@@ -24,7 +24,6 @@ const allowedOrigins = [
 
 function isAllowed(origin) {
   if (!origin) return true;
-
   if (allowedOrigins.includes(origin)) return true;
 
   // allow preview: https://xxxx.f-lock-frontend.pages.dev
@@ -71,7 +70,7 @@ const PORT = process.env.PORT || 4000;
   try {
     await connectDB();
 
-    // ✅ NEW: auto-lock timeout job
+    // ✅ START AUTO-LOCK JOB
     startAutoLockJob({
       timeoutMs: Number(process.env.AUTO_LOCK_TIMEOUT_MS) || 60_000,
       intervalMs: Number(process.env.AUTO_LOCK_INTERVAL_MS) || 10_000,
