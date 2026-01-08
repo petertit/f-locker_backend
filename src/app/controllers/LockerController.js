@@ -2,6 +2,7 @@
 import mongoose from "mongoose";
 import Locker from "../models/Locker.js";
 import History from "../models/History.js";
+import User from "../models/User.js";
 
 function normalizeLockerStatus(raw) {
   const s = String(raw || "")
@@ -19,31 +20,77 @@ function normalizeLockerStatus(raw) {
   return s;
 }
 
+async function ensure6LockersExist() {
+  const all = await Locker.find().lean();
+
+  for (let i = 1; i <= 6; i++) {
+    const id = i.toString().padStart(2, "0");
+    const exists = all.find((l) => l.lockerId === id);
+    if (!exists) {
+      await Locker.updateOne(
+        { lockerId: id },
+        {
+          $setOnInsert: {
+            lockerId: id,
+            status: "EMPTY",
+            ownerId: null,
+            timestamp: new Date(),
+            lastActiveAt: new Date(),
+          },
+        },
+        { upsert: true }
+      );
+    }
+  }
+}
+
+/**
+ * Đồng bộ/cleanup dữ liệu sai:
+ * - Nếu locker_states có ownerId nhưng user không tồn tại -> reset EMPTY
+ * - Nếu user tồn tại nhưng registeredLocker != lockerId -> reset EMPTY
+ */
+async function cleanupInconsistentOwners() {
+  const lockers = await Locker.find({ ownerId: { $ne: null } }).lean();
+  if (!lockers.length) return;
+
+  for (const l of lockers) {
+    const ownerIdStr = String(l.ownerId);
+
+    const user = await User.findById(ownerIdStr)
+      .select("_id registeredLocker")
+      .lean();
+
+    const userExists = !!user;
+    const userMatches =
+      userExists &&
+      user.registeredLocker &&
+      String(user.registeredLocker) === String(l.lockerId);
+
+    // ✅ Nếu không có user hoặc user không match locker => reset
+    if (!userExists || !userMatches) {
+      await Locker.updateOne(
+        { lockerId: l.lockerId },
+        {
+          $set: {
+            status: "EMPTY",
+            ownerId: null,
+            timestamp: new Date(),
+            lastActiveAt: new Date(),
+          },
+        }
+      );
+    }
+  }
+}
+
 class LockerController {
   // GET /lockers/status
   async status(req, res) {
     try {
-      // đảm bảo đủ 6 lockers
-      const all = await Locker.find().lean();
-      for (let i = 1; i <= 6; i++) {
-        const id = i.toString().padStart(2, "0");
-        const exists = all.find((l) => l.lockerId === id);
-        if (!exists) {
-          await Locker.updateOne(
-            { lockerId: id },
-            {
-              $setOnInsert: {
-                lockerId: id,
-                status: "EMPTY",
-                ownerId: null,
-                lastActiveAt: new Date(), // ✅ NEW
-                timestamp: new Date(),
-              },
-            },
-            { upsert: true }
-          );
-        }
-      }
+      await ensure6LockersExist();
+
+      // ✅ dọn dữ liệu sai (case bạn gặp)
+      await cleanupInconsistentOwners();
 
       const finalLockers = await Locker.find().lean();
       return res.json({
@@ -62,7 +109,7 @@ class LockerController {
     }
   }
 
-  // POST /lockers/update  (protected)
+  // POST /lockers/update
   async update(req, res) {
     try {
       const { lockerId } = req.body || {};
@@ -90,7 +137,7 @@ class LockerController {
       if (ownerIdFromBody) nextOwnerId = ownerIdFromBody;
       if (status === "EMPTY") nextOwnerId = null;
 
-      // ===== HISTORY OPEN + LOCK =====
+      // history
       if (current.ownerId) {
         if (status === "OPEN") {
           await new History({
@@ -113,7 +160,7 @@ class LockerController {
           status,
           ownerId: nextOwnerId,
           timestamp: new Date(),
-          lastActiveAt: new Date(), // ✅ NEW (mọi update đều “touch”)
+          lastActiveAt: new Date(),
         },
         { new: true, runValidators: true }
       ).lean();
@@ -139,7 +186,7 @@ class LockerController {
     }
   }
 
-  // POST /lockers/touch  (protected)
+  // POST /lockers/touch
   async touch(req, res) {
     try {
       const { lockerId } = req.body || {};
@@ -156,8 +203,7 @@ class LockerController {
           .json({ success: false, error: "Không tìm thấy tủ: " + lockerId });
       }
 
-      // ✅ Chỉ cho OWNER touch (tránh người khác giữ sống session)
-      const userId = req.user?.id; // từ auth_user.js :contentReference[oaicite:2]{index=2}
+      const userId = req.user?.id;
       const isOwner =
         current.ownerId && userId && String(current.ownerId) === String(userId);
 
