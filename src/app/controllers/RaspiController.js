@@ -5,7 +5,6 @@ function sendRaspiError(res, e, fallbackMsg) {
   const status = e?.status || 502;
   const payload = e?.payload;
 
-  // log để debug Render
   if (payload) {
     console.error("[RASPI ERROR]", {
       status,
