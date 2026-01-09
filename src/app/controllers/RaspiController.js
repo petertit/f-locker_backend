@@ -2,7 +2,7 @@
 import raspiService from "../../services/raspi_service.js";
 
 function sendRaspiError(res, e, fallbackMsg) {
-  const status = e?.status || 502; // Raspi fail -> 502, timeout -> 504
+  const status = e?.status || 502;
   const payload = e?.payload;
 
   // log để debug Render
@@ -125,7 +125,7 @@ class RaspiController {
       const r = await raspiService.captureRemoteBatch({
         name,
         images_data,
-        lockerId: lockerId || null, // ✅ forward nếu có
+        lockerId: lockerId || null,
       });
 
       return res.json({
@@ -148,7 +148,7 @@ class RaspiController {
 
       const r = await raspiService.captureBatch({
         name,
-        count: Number(count) || 5, // ✅ default 5
+        count: Number(count) || 5,
         lockerId: lockerId || null,
       });
 

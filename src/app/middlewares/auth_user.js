@@ -11,7 +11,6 @@ export default function authMiddleware(req, res, next) {
     const token = auth.split(" ")[1];
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-    // gắn user vào request
     req.user = {
       id: decoded.sub,
       email: decoded.email,

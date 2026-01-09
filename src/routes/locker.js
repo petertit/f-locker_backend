@@ -5,15 +5,12 @@ import authUser from "../app/middlewares/auth_user.js";
 
 const router = express.Router();
 
-// public
 router.get("/status", (req, res) => LockerController.status(req, res));
 
-// protected
 router.post("/update", authUser, (req, res) =>
   LockerController.update(req, res)
 );
 
-// ✅ NEW: heartbeat
 router.post("/touch", authUser, (req, res) => LockerController.touch(req, res));
 
 export default router;

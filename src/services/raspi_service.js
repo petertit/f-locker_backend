@@ -3,12 +3,11 @@
 
 const RASPI_BASE = process.env.RASPI_BASE_URL || process.env.RASPI_URL || "";
 
-// timeouts (ms)
 const TIMEOUT = {
   LOCK: 15000,
   UNLOCK: 15000,
   RECOGNIZE: 15000,
-  CAPTURE_TRAIN: 120000, // ✅ train lâu -> phải dài
+  CAPTURE_TRAIN: 120000,
 };
 
 function ensureBase() {
@@ -25,7 +24,6 @@ function safeJson(text) {
   }
 }
 
-// remove "data:image/...;base64," if present
 function stripDataUrl(dataUrlOrB64) {
   if (typeof dataUrlOrB64 !== "string") return "";
   const idx = dataUrlOrB64.indexOf("base64,");
@@ -62,7 +60,6 @@ async function postJson(path, bodyObj, timeoutMs) {
       url,
     };
 
-    // ✅ IMPORTANT: nếu Raspi trả lỗi -> throw để controller bắt & trả đúng
     if (!res.ok) {
       const msg =
         data?.error ||
@@ -77,7 +74,6 @@ async function postJson(path, bodyObj, timeoutMs) {
 
     return payload;
   } catch (e) {
-    // ✅ phân biệt timeout abort
     if (e?.name === "AbortError") {
       const err = new Error(
         `Raspi request timeout after ${timeoutMs}ms (path: ${path})`
@@ -97,7 +93,6 @@ const raspiService = {
   unlock: (lockerId, user) =>
     postJson("/unlock", { lockerId, user }, TIMEOUT.UNLOCK),
 
-  // Raspi nhận diện: chuẩn hóa để Raspi nhận base64 thuần
   recognizeRemote: ({ imageBase64, lockerId, user }) => {
     const b64 = stripDataUrl(imageBase64);
     return postJson(
@@ -105,15 +100,13 @@ const raspiService = {
       {
         lockerId,
         user,
-        image_data: b64, // ✅ Raspi server đọc image_data
-        // giữ thêm để tương thích nếu code cũ còn dùng:
+        image_data: b64,
         imageBase64,
       },
       TIMEOUT.RECOGNIZE
     );
   },
 
-  // Raspi chụp trực tiếp (nếu USE_CAMERA = True)
   captureBatch: ({ name, count = 5, lockerId = null }) =>
     postJson(
       "/capture-batch",
@@ -121,7 +114,6 @@ const raspiService = {
       TIMEOUT.CAPTURE_TRAIN
     ),
 
-  // Web chụp gửi lên Raspi để train
   captureRemoteBatch: ({ name, images_data, lockerId = null }) => {
     const imgs = Array.isArray(images_data) ? images_data : [];
     const normalized = imgs.map(stripDataUrl);

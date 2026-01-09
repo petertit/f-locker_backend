@@ -15,7 +15,6 @@ router.post("/recognize-remote", authUser, (req, res) =>
   RaspiController.recognizeRemote(req, res)
 );
 
-// ✅ training
 router.post("/capture-remote-batch", authUser, (req, res) =>
   RaspiController.captureRemoteBatch(req, res)
 );

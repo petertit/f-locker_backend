@@ -7,14 +7,12 @@ import dotenv from "dotenv";
 import route from "./routes/index.js";
 import connectDB from "./config/db/index.js";
 
-// ✅ NEW
 import { startAutoLockJob } from "./app/jobs/autoLockJob.js";
 
 dotenv.config();
 
 const app = express();
 
-// ✅ CORS: cho cả domain chính và preview kiểu bd153ecd.f-lock-frontend.pages.dev
 const allowedOrigins = [
   "https://f-lock-frontend.pages.dev",
   "http://localhost:5500",
@@ -26,7 +24,6 @@ function isAllowed(origin) {
   if (!origin) return true;
   if (allowedOrigins.includes(origin)) return true;
 
-  // allow preview: https://xxxx.f-lock-frontend.pages.dev
   if (/^https:\/\/[a-z0-9-]+\.f-lock-frontend\.pages\.dev$/i.test(origin))
     return true;
 
@@ -45,21 +42,17 @@ const corsOptions = {
 
 app.use(cors(corsOptions));
 
-// ✅ FIX 413: tăng limit cho JSON/base64
 app.use(express.json({ limit: "6mb" }));
 app.use(express.urlencoded({ extended: true, limit: "6mb" }));
 
 app.use(morgan("dev"));
 
-// ✅ health check
 app.get("/", (req, res) => {
   res.json({ ok: true, message: "F-LOCK backend is running ✅" });
 });
 
-// ✅ API routes
 route(app);
 
-// ✅ 404 handler
 app.use((req, res) => {
   return res.status(404).json({ ok: false, message: "Not Found" });
 });
@@ -70,7 +63,6 @@ const PORT = process.env.PORT || 4000;
   try {
     await connectDB();
 
-    // ✅ START AUTO-LOCK JOB
     startAutoLockJob({
       timeoutMs: Number(process.env.AUTO_LOCK_TIMEOUT_MS) || 60_000,
       intervalMs: Number(process.env.AUTO_LOCK_INTERVAL_MS) || 10_000,

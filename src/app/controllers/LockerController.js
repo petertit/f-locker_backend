@@ -44,11 +44,6 @@ async function ensure6LockersExist() {
   }
 }
 
-/**
- * Đồng bộ/cleanup dữ liệu sai:
- * - Nếu locker_states có ownerId nhưng user không tồn tại -> reset EMPTY
- * - Nếu user tồn tại nhưng registeredLocker != lockerId -> reset EMPTY
- */
 async function cleanupInconsistentOwners() {
   const lockers = await Locker.find({ ownerId: { $ne: null } }).lean();
   if (!lockers.length) return;
@@ -66,7 +61,6 @@ async function cleanupInconsistentOwners() {
       user.registeredLocker &&
       String(user.registeredLocker) === String(l.lockerId);
 
-    // ✅ Nếu không có user hoặc user không match locker => reset
     if (!userExists || !userMatches) {
       await Locker.updateOne(
         { lockerId: l.lockerId },
@@ -89,7 +83,6 @@ class LockerController {
     try {
       await ensure6LockersExist();
 
-      // ✅ dọn dữ liệu sai (case bạn gặp)
       await cleanupInconsistentOwners();
 
       const finalLockers = await Locker.find().lean();

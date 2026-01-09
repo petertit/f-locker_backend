@@ -1,3 +1,4 @@
+// src/routes/admin.js
 import express from "express";
 import AuthController from "../app/controllers/AuthController.js";
 import HistoryController from "./history_inline.js";

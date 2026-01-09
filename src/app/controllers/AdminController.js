@@ -7,14 +7,11 @@ class AdminController {
   // GET /admin/users
   async listUsers(req, res) {
     try {
-      // ✅ bỏ username (vì schema User không có username) :contentReference[oaicite:3]{index=3}
-      // ✅ thêm lockerCode + registeredLocker để admin quản lý
       const users = await User.find()
         .select("_id name email phone lockerCode registeredLocker createdAt")
         .sort({ createdAt: -1 })
         .lean();
 
-      // Lấy lockers để biết ai đang giữ tủ nào
       const lockers = await Locker.find()
         .select("lockerId status ownerId")
         .lean();
@@ -56,12 +53,9 @@ class AdminController {
           .json({ success: false, error: "Invalid user id" });
       }
 
-      // ✅ admin được phép sửa lockerCode
-      // ✅ xóa username (không nhận, không lưu)
       const { name, email, phone, lockerCode, registeredLocker } =
         req.body || {};
 
-      // Không cho sửa email của admin (tránh tự khóa)
       const target = await User.findById(id).select("email").lean();
       if (!target) {
         return res
@@ -85,11 +79,8 @@ class AdminController {
       if (typeof email === "string") patch.email = email.toLowerCase();
       if (typeof phone === "string") patch.phone = phone;
 
-      // ✅ Cho phép admin cập nhật lockerCode
       if (lockerCode !== undefined) patch.lockerCode = lockerCode;
 
-      // (optional) nếu admin muốn chỉnh tủ đã đăng ký của user
-      // ⚠️ nếu bạn muốn khóa cứng không cho admin sửa registeredLocker thì comment 2 dòng dưới
       if (registeredLocker !== undefined)
         patch.registeredLocker = registeredLocker;
 
@@ -133,8 +124,6 @@ class AdminController {
           .json({ success: false, error: "Cannot delete admin account" });
       }
 
-      // ✅ TRẢ TỦ VỀ TRỐNG: xoá ownerId + set EMPTY
-      // 1) Nếu user đang là ownerId của bất kỳ locker nào
       await Locker.updateMany(
         { ownerId: id },
         {
@@ -147,8 +136,6 @@ class AdminController {
         }
       );
 
-      // 2) Nếu bạn có logic registeredLocker nhưng locker_states chưa đúng,
-      // vẫn có thể reset thêm theo registeredLocker (best-effort)
       if (user.registeredLocker) {
         await Locker.updateOne(
           { lockerId: String(user.registeredLocker) },
@@ -163,7 +150,6 @@ class AdminController {
         );
       }
 
-      // ✅ XÓA USER
       await User.deleteOne({ _id: id });
 
       return res.json({ success: true });

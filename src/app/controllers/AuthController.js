@@ -4,8 +4,6 @@ import User from "../models/User.js";
 import History from "../models/History.js";
 import jwt from "jsonwebtoken";
 
-// Nếu bạn dùng User cho login thì không cần Account riêng
-// (giữ lại alias để khỏi phải sửa nhiều)
 const Account = User;
 
 function signToken(user) {
@@ -20,21 +18,17 @@ function signToken(user) {
   );
 }
 
-// Chuẩn hoá dữ liệu user trả về frontend (không trả password)
 const prepareUser = (acc) => {
   if (!acc) return null;
 
   const obj = acc.toObject ? acc.toObject() : { ...acc };
 
-  // đảm bảo _id dạng string + có cả id cho frontend nào dùng id
   const idStr = obj._id?.toString?.() || obj.id || null;
   obj._id = idStr;
   obj.id = idStr;
 
-  // không bao giờ trả password
   delete obj.password;
 
-  // đảm bảo luôn có field để UI không bị "undefined"
   if (obj.lockerCode === undefined) obj.lockerCode = null;
   if (obj.registeredLocker === undefined) obj.registeredLocker = null;
 
@@ -59,7 +53,7 @@ class AuthController {
         name,
         email,
         phone,
-        password, // ⚠️ nếu muốn an toàn: hash bcrypt
+        password,
         hint: hint ?? null,
         lockerCode: null,
         registeredLocker: null,
@@ -67,7 +61,6 @@ class AuthController {
 
       await acc.save();
 
-      // log lịch sử
       await new History({
         userId: acc._id,
         action: "REGISTERED",
@@ -95,7 +88,6 @@ class AuthController {
 
       const emailNorm = String(email).toLowerCase();
 
-      // ⚠️ lean() => object thường, không phải mongoose doc
       const user = await Account.findOne({ email: emailNorm }).lean();
       if (!user) {
         return res
@@ -103,7 +95,6 @@ class AuthController {
           .json({ success: false, error: "Email not found" });
       }
 
-      // ⚠️ nếu dùng bcrypt thì thay bằng bcrypt.compare()
       const ok = String(user.password) === String(password);
       if (!ok) {
         return res
@@ -113,7 +104,6 @@ class AuthController {
 
       const token = signToken(user);
 
-      // log lịch sử
       try {
         await new History({
           userId: user._id,
@@ -121,7 +111,6 @@ class AuthController {
         }).save();
       } catch (_) {}
 
-      // ✅ QUAN TRỌNG: trả về lockerCode + registeredLocker
       return res.json({
         success: true,
         token,
@@ -156,7 +145,6 @@ class AuthController {
       if (password !== undefined) fields.password = password;
       if (hint !== undefined) fields.hint = hint;
 
-      // ✅ 2 field quan trọng của bạn
       if (lockerCode !== undefined) fields.lockerCode = lockerCode;
       if (registeredLocker !== undefined)
         fields.registeredLocker = registeredLocker;
@@ -173,7 +161,6 @@ class AuthController {
           .json({ success: false, error: "User not found" });
       }
 
-      // log lịch sử nếu có update locker
       if (lockerCode !== undefined || registeredLocker !== undefined) {
         try {
           await new History({

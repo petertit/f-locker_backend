@@ -3,20 +3,10 @@ import Locker from "../models/Locker.js";
 import History from "../models/History.js";
 import raspiService from "../../services/raspi_service.js";
 
-/**
- * Auto-lock lockers when inactive for a timeout.
- *
- * Logic:
- * - Only consider lockers that are OPEN and have ownerId
- * - Determine lastActive = lastActiveAt || timestamp || Date.now()
- * - If now - lastActive > timeoutMs => lock
- *
- * Why fallback?
- * - Existing Mongo documents may not have lastActiveAt.
- */
+
 export function startAutoLockJob({
-  timeoutMs = 60_000, // 60s
-  intervalMs = 10_000, // 10s
+  timeoutMs = 60_000, 
+  intervalMs = 10_000, 
 } = {}) {
   console.log(
     `🕒 Auto-lock job started | timeout=${timeoutMs}ms | interval=${intervalMs}ms`
@@ -31,8 +21,7 @@ export function startAutoLockJob({
     try {
       const now = Date.now();
 
-      // ✅ Only lockers that are OPEN and have ownerId
-      // (If you want ultra-safe: change OPEN -> {$in:["OPEN","LOCKED"]})
+     
       const candidates = await Locker.find({
         status: "OPEN",
         ownerId: { $ne: null },
@@ -57,10 +46,10 @@ export function startAutoLockJob({
 
       for (const l of expired) {
         try {
-          // 1) Raspi lock
+        
           await raspiService.lock(l.lockerId, "AUTOLOCK");
 
-          // 2) Update DB -> LOCKED + refresh times
+         
           await Locker.updateOne(
             { lockerId: l.lockerId },
             {
@@ -72,7 +61,7 @@ export function startAutoLockJob({
             }
           );
 
-          // 3) History
+      
           await new History({
             userId: l.ownerId,
             lockerId: l.lockerId,
@@ -81,7 +70,7 @@ export function startAutoLockJob({
 
           console.log(`🔒 AUTOLOCK OK locker=${l.lockerId}`);
         } catch (e) {
-          // If Raspi fails, keep OPEN so job retries next round
+        
           console.warn(
             `⚠️ AUTOLOCK FAIL locker=${l.lockerId}:`,
             e?.message || e

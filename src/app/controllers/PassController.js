@@ -5,8 +5,6 @@ class PassController {
   // POST /pass/verify
   async verify(req, res) {
     try {
-      // ✅ Lấy userId từ middleware JWT
-      // Tùy middleware của bạn set field nào, thường là req.user hoặc req.userId
       const userId = req.user?.id || req.user?._id || req.userId;
 
       if (!userId) {
