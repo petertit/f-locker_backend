@@ -40,7 +40,7 @@ class RaspiController {
 
       const user = req.user?.email || null;
 
-      // ✅ service đã throw nếu lỗi
+     
       const r = await raspiService.lock(lockerId, user);
 
       return res.json({
@@ -136,7 +136,7 @@ class RaspiController {
     }
   }
 
-  // POST /raspi/capture-batch (Raspi tự chụp)
+  // POST /raspi/capture-batch
   async captureBatch(req, res) {
     try {
       const { name, count, lockerId } = req.body || {};

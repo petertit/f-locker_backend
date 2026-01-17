@@ -1,5 +1,4 @@
 // src/app/services/raspi_service.js
-// Node 22+ có fetch sẵn, KHÔNG cần node-fetch
 
 const RASPI_BASE = process.env.RASPI_BASE_URL || process.env.RASPI_URL || "";
 
@@ -76,7 +75,7 @@ async function postJson(path, bodyObj, timeoutMs) {
   } catch (e) {
     if (e?.name === "AbortError") {
       const err = new Error(
-        `Raspi request timeout after ${timeoutMs}ms (path: ${path})`
+        `Raspi request timeout after ${timeoutMs}ms (path: ${path})`,
       );
       err.status = 504;
       throw err;
@@ -103,7 +102,7 @@ const raspiService = {
         image_data: b64,
         imageBase64,
       },
-      TIMEOUT.RECOGNIZE
+      TIMEOUT.RECOGNIZE,
     );
   },
 
@@ -111,7 +110,7 @@ const raspiService = {
     postJson(
       "/capture-batch",
       { name, count, ...(lockerId ? { lockerId } : {}) },
-      TIMEOUT.CAPTURE_TRAIN
+      TIMEOUT.CAPTURE_TRAIN,
     ),
 
   captureRemoteBatch: ({ name, images_data, lockerId = null }) => {
@@ -125,7 +124,7 @@ const raspiService = {
         images_data: normalized,
         ...(lockerId ? { lockerId } : {}),
       },
-      TIMEOUT.CAPTURE_TRAIN
+      TIMEOUT.CAPTURE_TRAIN,
     );
   },
 };
