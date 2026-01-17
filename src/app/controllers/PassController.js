@@ -29,8 +29,6 @@ class PassController {
           .json({ success: false, error: "User not found" });
       }
 
-      // ✅ Verify lockerCode
-      // Nếu lockerCode là dạng plain text:
       const dbCode = String(user.lockerCode || "");
       const inputCode = String(lockerCode || "");
 
@@ -40,8 +38,6 @@ class PassController {
           .json({ success: false, error: "Invalid locker code" });
       }
 
-      // ✅ (khuyên) kiểm tra đúng tủ user đã đăng ký
-      // Nếu bạn lưu registeredLocker / lockerId trong user
       const registered =
         user.registeredLocker || user.lockerId || user.locker || null;
 
